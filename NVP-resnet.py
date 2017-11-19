@@ -64,19 +64,27 @@ class NVPFlow:
         if output is not None:
             self.mask = np.zeros(dim, np.bool)
         
-    def __call__(self, inp_flows=None, inverse=False):
+    def __call__(self, inp_flows=None, aux_vars=None, inverse=False):
         
         if isinstance(inp_flows, FlowSequence):
             prev_flow_output = inp_flows[-1].output
             dim = int(inp_flows[-1].dim)
+            prev_flow = inp_flows[-1]
         elif isinstance(inp_flows, NVPFlow):
             prev_flow_output = inp_flows.output
             dim = inp_flows.dim
             inp_flows = FlowSequence([inp_flows])
+            prev_flow = inp_flows[-1]
         else:
             raise ValueError('Input flow must be either a flowsequence or a flow')
             
         self.dim = dim
+        if hasattr(prev_flow, 'aux_vars'):
+            self.aux_vars = prev_flow.aux_vars
+            if aux_vars is not None:
+                raise ValueError('aux vars can be specified for single flow only')
+        if aux_vars is not None:
+            self.aux_vars = aux_vars
         
         if inp_flows is None:
             
@@ -130,10 +138,12 @@ class NVPFlow:
             input_tensor = prev_flow_output*mask
             
             blend_tensor = prev_flow_output*(1 - mask)
+
+            is hasattr(self, 'aux_vars'):
+                blend_tensor = tf.concat([blend_tensor, self.aux_vars], axis=-1)
             
             gate = Dense(blend_tensor, dim, name='preelastic')
-            gate_scaler = 1.5
-            gate = tf.log1p(tf.exp(gate))
+            gate = tf.exp(gate)
             
             transition = Dense(blend_tensor, dim, name='transition')
             
