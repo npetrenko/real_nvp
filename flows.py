@@ -2,6 +2,8 @@ import tensorflow as tf
 import numpy as np
 from collections.abc import Sequence
 
+phase = tf.placeholder_with_default(True, shape=(), name='learning_phase')
+
 class FlowSequence(Sequence):
     def __init__(self, flows = []):
         self.flows = flows
@@ -148,5 +150,166 @@ class NVPFlow:
                 self.output = transformed * mask + blend_tensor
             
             self.logj =  tf.reduce_sum(gate*mask, axis=-1, name='logj')
+            
+        return out_flows
+    
+class ResFlow:
+    def __init__(self, dim=None, name='ResFlow', output=None):
+        self.dim = dim
+        self.name = name
+        self.output = output
+        if output is not None:
+            self.mask = np.zeros(dim, np.bool)
+        
+    def __call__(self, inp_flows=None, inverse=False):
+        
+        if isinstance(inp_flows, FlowSequence):
+            prev_flow_output = inp_flows[-1].output
+            dim = int(inp_flows[-1].dim)
+        elif isinstance(inp_flows, NVPFlow):
+            prev_flow_output = inp_flows.output
+            dim = inp_flows.dim
+            inp_flows = FlowSequence([inp_flows])
+        else:
+            raise ValueError('Input flow must be either a flowsequence or a flow')
+            
+        self.dim = dim
+        
+        if inp_flows is None:
+            
+            if hasattr(self, 'mask'):
+                mask = self.mask
+            else:
+                mask = np.zeros(dim, np.bool)
+                mask[:dim//2] = True
+                self.mask = mask
+                
+            out_flows = FlowSequence([self])
+        else:
+            if hasattr(self, 'mask'):
+                mask = self.mask
+                
+            else:
+                prev_cover = np.zeros(dim, np.int)
+                for flow in inp_flows:
+                    prev_cover += flow.mask
+                
+                sort = np.argsort(prev_cover)[:dim//2]
+                mask = np.zeros_like(prev_cover).astype('bool')
+                mask[sort] = True
+                #print(mask)
+
+                if np.sum(mask) >= dim//2:
+                    ix = np.arange(len(mask))[mask]
+                    new_ix = np.random.choice(ix, size=dim//2, replace=False)
+                    new_mask = np.zeros_like(mask)
+                    new_mask[new_ix] = True
+                    mask = new_mask
+
+                elif np.sum(mask) < dim//2:
+                    ix = np.arange(len(mask))[np.logical_not(mask)]
+                    new_ix = np.random.choice(ix, size=dim//2 - np.sum(mask), replace=False)
+                    new_mask = np.zeros_like(mask)
+                    new_mask[new_ix] = True
+                    mask += new_mask
+                
+                self.mask = mask
+            
+            out_flows = inp_flows.add(self)
+                
+        with tf.variable_scope(self.name, reuse=tf.AUTO_REUSE):
+            rescaler = np.ones_like(mask).astype('float32')
+            rescaler[np.logical_not(mask)] = 2
+            #print(rescaler)
+            
+            mask = mask[np.newaxis,:]
+            
+            input_tensor = prev_flow_output*mask
+            
+            blend_tensor = prev_flow_output*(1 - mask)
+            
+            gate = Dense(blend_tensor, dim, name='preelastic')
+            gate_scaler = 1.5
+            gate = tf.log1p(tf.exp(gate))
+            
+            transition = Dense(blend_tensor, dim, name='transition')
+            
+            if not inverse:
+                transformed = gate*input_tensor + transition
+                self.output = transformed * mask + blend_tensor
+                
+                self.output += inp_flows[-1].output
+                self.output /= rescaler
+                
+            else:
+                restored = (input_tensor - transition)/(gate + 1)
+                self.output = mask*restored + (1-mask)*blend_tensor
+            
+            self.logj =  tf.reduce_sum(tf.log1p(gate*mask) - np.log(rescaler), axis=-1)
+            
+        return out_flows
+    
+class BNFlow:
+    def __init__(self, dim=None, name='BNFlow', output=None):
+        self.dim = dim
+        self.name = name
+        self.output = output
+        self.gamma = 0.99
+        if output is not None:
+            self.mask = np.zeros(dim, np.bool)
+    
+    def _update_stats(self, inp_tensor):
+        mu = tf.get_variable('mu', shape=inp_tensor.shape[1:], trainable=False)
+        sigma2 = tf.get_variable('sigma2', trainable=False, initializer=tf.ones(inp_tensor.shape[1:]))
+        
+        offset = tf.get_variable('offset', shape=mu.shape)
+        scale = tf.get_variable('scale', initializer=tf.zeros(inp_tensor.shape[1:]))
+        scale = tf.identity(tf.log1p(tf.exp(scale)), name='scale')
+        
+        mean = tf.reduce_mean(inp_tensor, axis=0)
+        mean2 = tf.reduce_mean(inp_tensor**2, axis=0)
+        
+        if not hasattr(self, 'ops'):
+            op1 = mu.assign(mu*self.gamma + mean*(1 - self.gamma))
+            op2 = sigma2.assign(sigma2*self.gamma + (mean2 - mean**2)*(1-self.gamma))
+            self.ops = [op1, op2]
+        
+        self.collected = [mu, sigma2]
+        self.adjust = [offset, scale]
+        self.stats = [mean, mean2-mean**2]
+        
+    def __call__(self, inp_flows=None, inverse=False):
+        
+        if isinstance(inp_flows, FlowSequence):
+            prev_flow_output = inp_flows[-1].output
+            dim = int(inp_flows[-1].dim)
+        elif isinstance(inp_flows, NVPFlow):
+            prev_flow_output = inp_flows.output
+            dim = inp_flows.dim
+            inp_flows = FlowSequence([inp_flows])
+        else:
+            raise ValueError('Input flow must be either a flowsequence or a flow')
+        
+        if hasattr(inp_flows[-1],'mask'):
+            self.mask = inp_flows[-1].mask
+            
+        self.dim = dim
+
+        out_flows = inp_flows.add(self)
+                
+        with tf.variable_scope(self.name, reuse=tf.AUTO_REUSE):
+            
+            self._update_stats(prev_flow_output)
+            
+            mean = tf.where(phase, self.stats[0], self.collected[0])
+            var = tf.where(phase, self.stats[1], self.collected[1])
+            
+            if not inverse:
+                self.output = self.adjust[0] + self.adjust[1]*(prev_flow_output - mean) / tf.sqrt(var)
+            else:
+                self.output = (prev_flow_output - self.adjust[0])*tf.sqrt(var) / self.adjust[1] + mean
+            
+            self.logj =  tf.reduce_sum(tf.log(self.adjust[1]), axis=-1, name='logj')
+            self.logj -= 0.5*tf.reduce_sum(tf.log(var), axis=-1, name='logj')
             
         return out_flows
