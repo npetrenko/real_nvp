@@ -1,6 +1,7 @@
 import tensorflow as tf
 import numpy as np
 from collections.abc import Sequence
+from basedistrs import *
 
 phase = tf.placeholder_with_default(True, shape=(), name='learning_phase')
 
