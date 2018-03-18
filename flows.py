@@ -197,7 +197,6 @@ class ResFlow(Flow):
             blend_tensor = prev_flow_output*(1 - mask)
             
             gate = Dense(blend_tensor, dim, name='preelastic')
-            gate_scaler = 1.5
             gate = tf.log1p(tf.exp(gate))
             
             transition = Dense(blend_tensor, dim, name='transition')
@@ -216,14 +215,10 @@ class ResFlow(Flow):
             self.logj =  tf.reduce_sum(tf.log1p(gate*mask) - np.log(rescaler), axis=-1)
         return out_flows
     
-class BNFlow:
+class BNFlow(Flow):
     def __init__(self, dim=None, name='BNFlow', output=None):
-        self.dim = dim
-        self.name = name
-        self.output = output
+        super().__init__(dim,name,output)
         self.gamma = 0.99
-        if output is not None:
-            self.mask = np.zeros(dim, np.bool)
     
     def _update_stats(self, inp_tensor):
         mu = tf.get_variable('mu', shape=inp_tensor.shape[1:], trainable=False)
@@ -246,23 +241,14 @@ class BNFlow:
         self.stats = [mean, mean2-mean**2]
         
     def __call__(self, inp_flows=None, inverse=False):
-        
-        if isinstance(inp_flows, FlowSequence):
-            prev_flow_output = inp_flows[-1].output
-            dim = int(inp_flows[-1].dim)
-        elif isinstance(inp_flows, NVPFlow):
-            prev_flow_output = inp_flows.output
-            dim = inp_flows.dim
-            inp_flows = FlowSequence([inp_flows])
-        else:
-            raise ValueError('Input flow must be either a flowsequence or a flow')
+        inp_flows = super().__call__(inp_flows, inverse) 
+        dim = self.dim
         
         if hasattr(inp_flows[-1],'mask'):
             self.mask = inp_flows[-1].mask
-            
-        self.dim = dim
 
         out_flows = inp_flows.add(self)
+        prev_flow_output = inp_flows[-1].output
                 
         with tf.variable_scope(self.name, reuse=tf.AUTO_REUSE):
             
