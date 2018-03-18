@@ -1,7 +1,7 @@
 import tensorflow as tf
 import numpy as np
 from collections.abc import Sequence
-from basedistrs import *
+from .basedistr import *
 
 phase = tf.placeholder_with_default(True, shape=(), name='learning_phase')
 
@@ -62,6 +62,21 @@ class FlowSequence(Sequence):
         
         self.logj = logj
         return logj
+
+class DFlow:
+    def __init__(self, flows):
+        base = Normal(flows[-1].dim)
+
+        fseq = FlowSequence(flows)
+
+        bsamp = base.sample()[tf.newaxis,:]
+        out = fseq.apply(bsamp)
+
+        self.base = base
+        self.output = out
+        self.fseq = fseq
+        self.logdens = base.logdens(bsamp) - fseq.calc_logj()
+        
     
 def Dense(inp, num_n, name='Dense', use_bias=True):
     with tf.variable_scope(name, initializer=tf.random_normal_initializer(stddev=0.01)):

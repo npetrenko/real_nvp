@@ -1,0 +1,4 @@
+*.egg-info
+flows/dist
+*.egg
+.ipynb_checkpoints
