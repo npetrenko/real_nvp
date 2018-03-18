@@ -70,30 +70,53 @@ def Dense(inp, num_n, name='Dense', use_bias=True):
             
     return pa
 
-class NVPFlow:
-    def __init__(self, dim=None, name='NVPFlow', output=None):
+class Flow:
+    def __init__(self, dim=None, name=None, output=None):
         self.dim = dim
         self.name = name
         self.output = output
         if output is not None:
             self.mask = np.zeros(dim, np.bool)
+
+    @staticmethod
+    def _calc_mask(inp_flows):
+        dim = inp_flows[-1].mask.shape[0]
+
+        prev_cover = np.zeros(dim, np.bool)
+        for flow in inp_flows:
+            prev_cover += flow.mask
+        uncovered = np.logical_not(prev_cover)
+        mask = uncovered
+
+        if np.sum(mask) >= dim//2:
+            ix = np.arange(len(mask))[mask]
+            new_ix = np.random.choice(ix, size=dim//2, replace=False)
+            new_mask = np.zeros_like(mask)
+            new_mask[new_ix] = True
+            mask = new_mask
+
+        elif np.sum(mask) < dim//2:
+            ix = np.arange(len(mask))[np.logical_not(mask)]
+            new_ix = np.random.choice(ix, size=dim//2 - np.sum(mask), replace=False)
+            new_mask = np.zeros_like(mask)
+            new_mask[new_ix] = True
+            mask += new_mask
         
+        return mask
+
     def __call__(self, inp_flows=None, inverse=False):
-        
+
         if isinstance(inp_flows, FlowSequence):
-            prev_flow_output = inp_flows[-1].output
             dim = int(inp_flows[-1].dim)
         elif isinstance(inp_flows, NVPFlow):
-            prev_flow_output = inp_flows.output
             dim = inp_flows.dim
             inp_flows = FlowSequence([inp_flows])
         else:
             raise ValueError('Input flow must be either a flowsequence or a flow')
-            
+
         self.dim = dim
         
         if inp_flows is None:
-            
             if hasattr(self, 'mask'):
                 mask = self.mask
             else:
@@ -101,35 +124,30 @@ class NVPFlow:
                 mask[:dim//2] = True
                 self.mask = mask
                 
-            out_flows = FlowSequence([self])
         else:
             if hasattr(self, 'mask'):
                 mask = self.mask
                 
             else:
-                prev_cover = np.zeros(dim, np.bool)
-                for flow in inp_flows:
-                    prev_cover += flow.mask
-                uncovered = np.logical_not(prev_cover)
-                mask = uncovered
-
-                if np.sum(mask) >= dim//2:
-                    ix = np.arange(len(mask))[mask]
-                    new_ix = np.random.choice(ix, size=dim//2, replace=False)
-                    new_mask = np.zeros_like(mask)
-                    new_mask[new_ix] = True
-                    mask = new_mask
-
-                elif np.sum(mask) < dim//2:
-                    ix = np.arange(len(mask))[np.logical_not(mask)]
-                    new_ix = np.random.choice(ix, size=dim//2 - np.sum(mask), replace=False)
-                    new_mask = np.zeros_like(mask)
-                    new_mask[new_ix] = True
-                    mask += new_mask
-                
+                mask = self._calc_mask(inp_flows)
                 self.mask = mask
-            
+        return inp_flows
+
+class NVPFlow(Flow):
+    def __init__(self, dim=None, name='NVPFlow', output=None):
+        super().__init__(dim, name, output)
+
+    def __call__(self, inp_flows=None, inverse=False):
+        inp_flows = super().__call__(inp_flows, inverse)
+        mask, dim = self.mask, self.dim
+
+        if inp_flows is None:
+            out_flows = FlowSequence([self])
+
+        else:
             out_flows = inp_flows.add(self)
+
+        prev_flow_output = inp_flows[-1].output
                 
         with tf.variable_scope(self.name, reuse=tf.AUTO_REUSE):
             mask = mask[np.newaxis,:]
@@ -153,69 +171,19 @@ class NVPFlow:
             
         return out_flows
     
-class ResFlow:
+class ResFlow(Flow):
     def __init__(self, dim=None, name='ResFlow', output=None):
-        self.dim = dim
-        self.name = name
-        self.output = output
-        if output is not None:
-            self.mask = np.zeros(dim, np.bool)
+        super().__init__(dim,name,output)
         
     def __call__(self, inp_flows=None, inverse=False):
-        
-        if isinstance(inp_flows, FlowSequence):
-            prev_flow_output = inp_flows[-1].output
-            dim = int(inp_flows[-1].dim)
-        elif isinstance(inp_flows, NVPFlow):
-            prev_flow_output = inp_flows.output
-            dim = inp_flows.dim
-            inp_flows = FlowSequence([inp_flows])
-        else:
-            raise ValueError('Input flow must be either a flowsequence or a flow')
-            
-        self.dim = dim
-        
+        inp_flows = super().__call__(inp_flows, inverse)
+        mask, dim = self.mask, self.dim
+
         if inp_flows is None:
-            
-            if hasattr(self, 'mask'):
-                mask = self.mask
-            else:
-                mask = np.zeros(dim, np.bool)
-                mask[:dim//2] = True
-                self.mask = mask
-                
             out_flows = FlowSequence([self])
         else:
-            if hasattr(self, 'mask'):
-                mask = self.mask
-                
-            else:
-                prev_cover = np.zeros(dim, np.int)
-                for flow in inp_flows:
-                    prev_cover += flow.mask
-                
-                sort = np.argsort(prev_cover)[:dim//2]
-                mask = np.zeros_like(prev_cover).astype('bool')
-                mask[sort] = True
-                #print(mask)
-
-                if np.sum(mask) >= dim//2:
-                    ix = np.arange(len(mask))[mask]
-                    new_ix = np.random.choice(ix, size=dim//2, replace=False)
-                    new_mask = np.zeros_like(mask)
-                    new_mask[new_ix] = True
-                    mask = new_mask
-
-                elif np.sum(mask) < dim//2:
-                    ix = np.arange(len(mask))[np.logical_not(mask)]
-                    new_ix = np.random.choice(ix, size=dim//2 - np.sum(mask), replace=False)
-                    new_mask = np.zeros_like(mask)
-                    new_mask[new_ix] = True
-                    mask += new_mask
-                
-                self.mask = mask
-            
             out_flows = inp_flows.add(self)
+        prev_flow_output = inp_flows[-1].output
                 
         with tf.variable_scope(self.name, reuse=tf.AUTO_REUSE):
             rescaler = np.ones_like(mask).astype('float32')
@@ -246,7 +214,6 @@ class ResFlow:
                 self.output = mask*restored + (1-mask)*blend_tensor
             
             self.logj =  tf.reduce_sum(tf.log1p(gate*mask) - np.log(rescaler), axis=-1)
-            
         return out_flows
     
 class BNFlow:
