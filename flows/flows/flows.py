@@ -242,7 +242,7 @@ class BNFlow(Flow):
         scale = tf.identity(tf.log1p(tf.exp(scale)), name='scale')
         
         mean = tf.reduce_mean(inp_tensor, axis=0)
-        mean2 = tf.reduce_mean(inp_tensor**2, axis=0)
+        mean2 = tf.reduce_mean(tf.square(inp_tensor), axis=0)
         
         if not hasattr(self, 'ops'):
             op1 = mu.assign(mu*self.gamma + mean*(1 - self.gamma))
@@ -251,7 +251,7 @@ class BNFlow(Flow):
         
         self.collected = [mu, sigma2]
         self.adjust = [offset, scale]
-        self.stats = [mean, mean2-mean**2]
+        self.stats = [mean, mean2-tf.square(mean)]
         
     def __call__(self, inp_flows=None, inverse=False):
         inp_flows = super().__call__(inp_flows, inverse) 
@@ -273,7 +273,8 @@ class BNFlow(Flow):
             else:
                 self.output = (prev_flow_output - self.adjust[0])*tf.sqrt(var) / self.adjust[1] + mean
             
-            self.logj =  tf.reduce_sum(tf.log(self.adjust[1]), axis=-1, name='logj')
-            self.logj -= 0.5*tf.reduce_sum(tf.log(var), axis=-1, name='logj')
+            with tf.name_scope('logj'):
+                self.logj =  tf.reduce_sum(tf.log(self.adjust[1]), axis=-1, name='logj')
+                self.logj -= 0.5*tf.reduce_sum(tf.log(var), axis=-1, name='logj_var')
             
         return out_flows
