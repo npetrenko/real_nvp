@@ -82,25 +82,15 @@ class Flow:
     def _calc_mask(inp_flows):
         dim = inp_flows[-1].mask.shape[0]
 
-        prev_cover = np.zeros(dim, np.bool)
+        prev_cover = np.zeros(dim, np.int)
         for flow in inp_flows:
             prev_cover += flow.mask
-        uncovered = np.logical_not(prev_cover)
-        mask = uncovered
 
-        if np.sum(mask) >= dim//2:
-            ix = np.arange(len(mask))[mask]
-            new_ix = np.random.choice(ix, size=dim//2, replace=False)
-            new_mask = np.zeros_like(mask)
-            new_mask[new_ix] = True
-            mask = new_mask
+        least_covered = np.argsort(prev_cover)
+        mask = np.zeros(dim, np.bool)
 
-        elif np.sum(mask) < dim//2:
-            ix = np.arange(len(mask))[np.logical_not(mask)]
-            new_ix = np.random.choice(ix, size=dim//2 - np.sum(mask), replace=False)
-            new_mask = np.zeros_like(mask)
-            new_mask[new_ix] = True
-            mask += new_mask
+        for i in least_covered[:min(len(least_covered)//2 + 1, dim-1)]:
+            mask[i] = True
         
         return mask
 
@@ -244,14 +234,12 @@ class BNFlow(Flow):
         inp_flows = super().__call__(inp_flows, inverse) 
         dim = self.dim
         
-        if hasattr(inp_flows[-1],'mask'):
-            self.mask = inp_flows[-1].mask
+        self.mask = np.zeros(dim, np.bool)
 
         out_flows = inp_flows.add(self)
         prev_flow_output = inp_flows[-1].output
                 
         with tf.variable_scope(self.name, reuse=tf.AUTO_REUSE):
-            
             self._update_stats(prev_flow_output)
             
             mean = tf.where(phase, self.stats[0], self.collected[0])
