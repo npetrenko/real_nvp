@@ -192,23 +192,24 @@ class ResFlow(Flow):
             blend_tensor = prev_flow_output*(1 - mask)
             
             gate = Dense(blend_tensor, dim, name='preelastic')
-            gate = tf.log1p(tf.exp(gate))
             gate = softbound(gate, -8, 8)
+            gate = tf.exp(gate)
             
             transition = Dense(blend_tensor, dim, name='transition')
             
             if not inverse:
                 transformed = gate*input_tensor + transition
-                self.output = transformed * mask + blend_tensor
+                self.output = transformed * mask + blend_tensor * (1-mask)
                 
                 self.output += inp_flows[-1].output
-                self.output /= rescaler
+                #self.output /= rescaler
+                self.output /= 2
                 
             else:
-                restored = (input_tensor - transition)/(gate + 1)
+                restored = 2*(input_tensor - 0.5*transition)/(gate + 1)
                 self.output = mask*restored + (1-mask)*blend_tensor
             
-            self.logj =  tf.reduce_sum(tf.log1p(gate*mask) - np.log(rescaler), axis=-1)
+            self.logj =  tf.reduce_sum(tf.log1p(gate*mask) - np.log(2), axis=-1)
         return out_flows
     
 class BNFlow(Flow):
