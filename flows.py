@@ -4,6 +4,10 @@ from collections.abc import Sequence
 
 phase = tf.placeholder_with_default(True, shape=(), name='learning_phase')
 
+def softbound(x, a, b):
+    assert b > a
+    return a + (b-a)*(tf.atan(x) + np.pi/2)/np.pi
+
 class FlowSequence(Sequence):
     def __init__(self, flows = []):
         self.flows = flows
@@ -148,6 +152,7 @@ class NVPFlow(Flow):
             
             gate = Dense(blend_tensor, dim, name='preelastic')
             transition = Dense(blend_tensor, dim, name='transition')
+            gate = softbound(gate, -8, 8)
             
             if not inverse:
                 transformed = tf.exp(gate)*input_tensor + transition
@@ -188,6 +193,7 @@ class ResFlow(Flow):
             
             gate = Dense(blend_tensor, dim, name='preelastic')
             gate = tf.log1p(tf.exp(gate))
+            gate = softbound(gate, -8, 8)
             
             transition = Dense(blend_tensor, dim, name='transition')
             
