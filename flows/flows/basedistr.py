@@ -10,7 +10,7 @@ class Distribution:
         raise NotImplementedError
 
 class Normal(Distribution):
-    def __init__(self, dim, sigma=1, mu=0):
+    def __init__(self, dim, mu=0, sigma=1):
         self.sigma = float(sigma)
         self.mu = float(mu)
         self.dim = dim
@@ -24,8 +24,8 @@ class Normal(Distribution):
         return tf.random_normal([self.dim], self.mu, self.sigma)
 
 class NormalRW(Normal):
-    def __init__(self, dim, sigma=1, mu=0, mu0=0, sigma0=1):
-        super().__init__(dim, sigma, mu)
+    def __init__(self, dim, mu=0, sigma=1, mu0=0, sigma0=1):
+        super().__init__(dim, mu, sigma)
         self.init_distr = Normal(None, mu0, sigma0)
 
     def logdens(self, x):
