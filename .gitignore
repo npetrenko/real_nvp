@@ -2,3 +2,4 @@
 flows/dist
 *.egg
 .ipynb_checkpoints
+flows/build

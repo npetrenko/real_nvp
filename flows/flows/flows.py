@@ -91,10 +91,11 @@ def Dense(inp, num_n, name='Dense', use_bias=True):
     return pa
 
 class Flow:
-    def __init__(self, dim=None, name=None, output=None):
+    def __init__(self, dim=None, name=None, output=None, aux_vars=None):
         self.dim = dim
         self.name = name
         self.output = output
+        self.aux_vars = aux_vars
         if output is not None:
             self.mask = np.zeros(dim, np.bool)
 
@@ -144,8 +145,8 @@ class Flow:
         return inp_flows
 
 class NVPFlow(Flow):
-    def __init__(self, dim=None, name='NVPFlow', output=None):
-        super().__init__(dim, name, output)
+    def __init__(self, dim=None, name='NVPFlow', output=None, aux_vars=None):
+        super().__init__(dim, name, output, aux_vars)
 
     def __call__(self, inp_flows=None, inverse=False):
         inp_flows = super().__call__(inp_flows, inverse)
@@ -165,9 +166,14 @@ class NVPFlow(Flow):
             input_tensor = prev_flow_output*mask
             
             blend_tensor = prev_flow_output*(1 - mask)
+
+            if self.aux_vars is not None:
+                blend_tensor_full = tf.concat([blend_tensor, self.aux_vars], axis=-1)
+            else:
+                blend_tensor_full = blend_tensor
             
-            gate = Dense(blend_tensor, dim, name='preelastic')
-            transition = Dense(blend_tensor, dim, name='transition')
+            gate = Dense(blend_tensor_full, dim, name='preelastic')
+            transition = Dense(blend_tensor_full, dim, name='transition')
             gate = softbound(gate, -8, 8)
             
             if not inverse:
@@ -183,8 +189,8 @@ class NVPFlow(Flow):
         return out_flows
     
 class ResFlow(Flow):
-    def __init__(self, dim=None, name='ResFlow', output=None):
-        super().__init__(dim,name,output)
+    def __init__(self, dim=None, name='ResFlow', output=None, aux_vars=None):
+        super().__init__(dim,name,output, aux_vars)
         
     def __call__(self, inp_flows=None, inverse=False):
         inp_flows = super().__call__(inp_flows, inverse)
@@ -207,18 +213,22 @@ class ResFlow(Flow):
             
             blend_tensor = prev_flow_output*(1 - mask)
             
-            gate = Dense(blend_tensor, dim, name='preelastic')
+            if self.aux_vars is not None:
+                blend_tensor_full = tf.concat([blend_tensor, self.aux_vars], axis=-1)
+            else:
+                blend_tensor_full = blend_tensor
+            
+            gate = Dense(blend_tensor_full, dim, name='preelastic')
             gate = softbound(gate, -8, 8)
             gate = tf.exp(gate)
             
-            transition = Dense(blend_tensor, dim, name='transition')
+            transition = Dense(blend_tensor_full, dim, name='transition')
             
             if not inverse:
                 transformed = gate*input_tensor + transition
                 self.output = transformed * mask + blend_tensor * (1-mask)
                 
                 self.output += inp_flows[-1].output
-                #self.output /= rescaler
                 self.output /= 2
                 
             else:
@@ -230,7 +240,7 @@ class ResFlow(Flow):
     
 class BNFlow(Flow):
     def __init__(self, dim=None, name='BNFlow', output=None):
-        super().__init__(dim,name,output)
+        super().__init__(dim,name,output,None)
         self.gamma = 0.99
     
     def _update_stats(self, inp_tensor):
@@ -263,7 +273,8 @@ class BNFlow(Flow):
         prev_flow_output = inp_flows[-1].output
                 
         with tf.variable_scope(self.name, reuse=tf.AUTO_REUSE):
-            self._update_stats(prev_flow_output)
+            with tf.variable_scope('update_stats', reuse=tf.AUTO_REUSE): 
+                self._update_stats(prev_flow_output)
             
             mean = tf.where(phase, self.stats[0], self.collected[0])
             var = tf.where(phase, self.stats[1], self.collected[1])
