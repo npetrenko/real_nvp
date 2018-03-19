@@ -79,7 +79,7 @@ class DFlow:
         
     
 def Dense(inp, num_n, name='Dense', use_bias=True):
-    with tf.variable_scope(name, initializer=tf.random_normal_initializer(stddev=0.01)):
+    with tf.variable_scope(name, initializer=tf.random_normal_initializer(stddev=0.01, dtype=tf.float32)):
         inp_dim = int(inp.shape[-1])
         W = tf.get_variable('W', [inp_dim, num_n])
         pa = tf.matmul(inp, W)
