@@ -148,6 +148,32 @@ class Flow:
                 self.mask = mask
         return inp_flows
 
+class Linear(Flow):
+    def __init__(self, dim=None, name='LinFlow', output=None, aux_vars=None):
+        super().__init__(dim, name, output, aux_vars)
+
+    def __call__(self, inp_flows=None, inverse=False):
+        inp_flows = super().__call__(inp_flows, inverse)
+        dim = self.dim
+        if inp_flows is None:
+            out_flows = FlowSequence([self])
+        else:
+            out_flows = inp_flows.add(self)
+        prev_flow_output = inp_flows[-1].output
+        with tf.variable_scope(self.name, reuse=tf.AUTO_REUSE, dtype=floatX):
+            W = tf.get_variable('W', initializer=tf.zeros([1, self.dim], dtype=floatX))
+            b = tf.get_variable('b', initializer=tf.zeros([1, self.dim], dtype=floatX))
+
+            gate = tf.exp(W)
+            if not inverse:
+                self.output = gate*prev_flow_output + b
+            else:
+                self.output = (prev_flow_output - b)/gate
+            self.logj = tf.reduce_mean(W, axis=-1, name='logj')
+
+        return out_flows
+
+
 class NVPFlow(Flow):
     def __init__(self, dim=None, name='NVPFlow', output=None, aux_vars=None):
         super().__init__(dim, name, output, aux_vars)
