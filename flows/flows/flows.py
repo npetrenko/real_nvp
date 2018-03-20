@@ -6,10 +6,12 @@ from .config import floatX
 
 phase = tf.placeholder_with_default(True, shape=(), name='learning_phase')
 
-def softbound(x, a, b):
+def softbound(x):
+    b = 8.
+    a = -8.
     assert b > a
-    #return a + (b-a)*(tf.atan(x) + np.pi/2)/np.pi
-    return x
+    return a + (b-a)*(tf.atan(x/(b-a)) + np.pi/2)/np.pi
+    #return x
 
 class FlowSequence(Sequence):
     def __init__(self, flows = []):
@@ -176,7 +178,7 @@ class NVPFlow(Flow):
             
             gate = Dense(blend_tensor_full, dim, name='preelastic')
             transition = Dense(blend_tensor_full, dim, name='transition')
-            gate = softbound(gate, -8, 8)
+            gate = softbound(gate)
             
             if not inverse:
                 transformed = tf.exp(gate)*input_tensor + transition
@@ -220,7 +222,7 @@ class ResFlow(Flow):
                 blend_tensor_full = blend_tensor
             
             gate = Dense(blend_tensor_full, dim, name='preelastic')
-            gate = softbound(gate, -8, 8)
+            gate = softbound(gate)
             gate = tf.exp(gate)
             
             transition = Dense(blend_tensor_full, dim, name='transition')
