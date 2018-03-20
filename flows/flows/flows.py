@@ -8,7 +8,8 @@ phase = tf.placeholder_with_default(True, shape=(), name='learning_phase')
 
 def softbound(x, a, b):
     assert b > a
-    return a + (b-a)*(tf.atan(x) + np.pi/2)/np.pi
+    #return a + (b-a)*(tf.atan(x) + np.pi/2)/np.pi
+    return x
 
 class FlowSequence(Sequence):
     def __init__(self, flows = []):
@@ -74,7 +75,7 @@ class DFlow:
         out = fseq.apply(bsamp)
 
         self.base = base
-        self.output = out/8
+        self.output = out#*8000
         self.fseq = fseq
         self.logdens = base.logdens(bsamp) - fseq.calc_logj()
         
