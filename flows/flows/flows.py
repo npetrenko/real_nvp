@@ -73,7 +73,7 @@ class DFlow:
         out = fseq.apply(bsamp)
 
         self.base = base
-        self.output = out
+        self.output = out/8
         self.fseq = fseq
         self.logdens = base.logdens(bsamp) - fseq.calc_logj()
         
@@ -184,7 +184,7 @@ class NVPFlow(Flow):
                 transformed = (input_tensor - transition)/tf.exp(gate)
                 self.output = transformed * mask + blend_tensor
             
-            self.logj =  tf.reduce_sum(gate*mask, axis=-1, name='logj')
+            self.logj =  tf.reduce_mean(gate*mask, axis=-1, name='logj')
             
         return out_flows
     
@@ -235,7 +235,7 @@ class ResFlow(Flow):
                 restored = 2*(input_tensor - 0.5*transition)/(gate + 1)
                 self.output = mask*restored + (1-mask)*blend_tensor
             
-            self.logj =  tf.reduce_sum(tf.log1p(gate*mask) - np.log(2), axis=-1)
+            self.logj =  tf.reduce_mean(tf.log1p(gate*mask) - np.log(2), axis=-1)
         return out_flows
     
 class BNFlow(Flow):
