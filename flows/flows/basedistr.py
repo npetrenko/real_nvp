@@ -1,5 +1,6 @@
 import tensorflow as tf
 import numpy as np
+from .config import floatX
 
 class Distribution:
     def __init__(self):
@@ -11,13 +12,15 @@ class Distribution:
 
 class Normal(Distribution):
     def __init__(self, dim, mu=0, sigma=1):
-        self.sigma = float(sigma)
-        self.mu = float(mu)
+        self.sigma = np.array(sigma, dtype=floatX)
+        self.mu = np.array(mu, dtype=floatX)
         self.dim = dim
 
     def logdens(self, x, mean=False, full_reduce=True):
         s2 = tf.square(self.sigma)
-        tmp = -tf.square(x-self.mu)/(2*s2) - 0.5 * tf.log(2*np.pi*s2)
+
+        denum = - 0.5 * tf.log(2*np.pi*s2)
+        tmp = -tf.square(x-self.mu)/(2*s2) + denum
 
         if full_reduce:
             idx = list(range(len(tmp.shape)))
@@ -30,7 +33,7 @@ class Normal(Distribution):
             return tf.reduce_sum(tmp, idx)
 
     def sample(self):
-        return tf.random_normal([self.dim], self.mu, self.sigma)
+        return tf.random_normal([self.dim], self.mu, self.sigma, dtype=floatX)
 
 class NormalRW(Normal):
     def __init__(self, dim, mu=0, sigma=1, mu0=0, sigma0=1):

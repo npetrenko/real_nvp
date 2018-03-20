@@ -2,6 +2,7 @@ import tensorflow as tf
 import numpy as np
 from collections.abc import Sequence
 from .basedistr import *
+from .config import floatX
 
 phase = tf.placeholder_with_default(True, shape=(), name='learning_phase')
 
@@ -79,13 +80,13 @@ class DFlow:
         
     
 def Dense(inp, num_n, name='Dense', use_bias=True):
-    with tf.variable_scope(name, initializer=tf.random_normal_initializer(stddev=0.01, dtype=tf.float32)):
+    with tf.variable_scope(name, initializer=tf.random_normal_initializer(stddev=0.01, dtype=floatX)):
         inp_dim = int(inp.shape[-1])
-        W = tf.get_variable('W', [inp_dim, num_n])
+        W = tf.get_variable('W', [inp_dim, num_n], dtype=floatX)
         pa = tf.matmul(inp, W)
         
         if use_bias:
-            b = tf.get_variable('b', [1, num_n])
+            b = tf.get_variable('b', [1, num_n], dtype=floatX)
             pa += b
             
     return pa
@@ -203,9 +204,8 @@ class ResFlow(Flow):
         prev_flow_output = inp_flows[-1].output
                 
         with tf.variable_scope(self.name, reuse=tf.AUTO_REUSE):
-            rescaler = np.ones_like(mask).astype('float32')
+            rescaler = np.ones_like(mask).astype(floatX)
             rescaler[np.logical_not(mask)] = 2
-            #print(rescaler)
             
             mask = mask[np.newaxis,:]
             
@@ -244,11 +244,11 @@ class BNFlow(Flow):
         self.gamma = 0.99
     
     def _update_stats(self, inp_tensor):
-        mu = tf.get_variable('mu', shape=inp_tensor.shape[1:], trainable=False)
-        sigma2 = tf.get_variable('sigma2', trainable=False, initializer=tf.ones(inp_tensor.shape[1:]))
+        mu = tf.get_variable('mu', shape=inp_tensor.shape[1:], trainable=False, dtype=floatX)
+        sigma2 = tf.get_variable('sigma2', trainable=False, initializer=tf.ones(inp_tensor.shape[1:], dtype=floatX))
         
-        offset = tf.get_variable('offset', shape=mu.shape)
-        scale = tf.get_variable('scale', initializer=tf.zeros(inp_tensor.shape[1:]))
+        offset = tf.get_variable('offset', shape=mu.shape, dtype=floatX)
+        scale = tf.get_variable('scale', initializer=tf.zeros(inp_tensor.shape[1:], dtype=floatX))
         scale = tf.identity(tf.log1p(tf.exp(scale)), name='scale')
         
         mean = tf.reduce_mean(inp_tensor, axis=0)
@@ -272,7 +272,7 @@ class BNFlow(Flow):
         out_flows = inp_flows.add(self)
         prev_flow_output = inp_flows[-1].output
                 
-        with tf.variable_scope(self.name, reuse=tf.AUTO_REUSE):
+        with tf.variable_scope(self.name, reuse=tf.AUTO_REUSE, dtype=floatX):
             with tf.variable_scope('update_stats', reuse=tf.AUTO_REUSE): 
                 self._update_stats(prev_flow_output)
             
