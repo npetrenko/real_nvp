@@ -68,18 +68,25 @@ class FlowSequence(Sequence):
         return logj
 
 class DFlow:
-    def __init__(self, flows):
-        base = Normal(flows[-1].dim)
+    def __init__(self, flows, init_sigma=1.):
+        base = Normal(flows[-1].dim, sigma=init_sigma)
 
         fseq = FlowSequence(flows)
 
-        bsamp = base.sample()[tf.newaxis,:]
-        out = fseq.apply(bsamp)
+        if not isinstance(fseq[-1], CFlow):
+            bsamp = base.sample()[tf.newaxis,:]
+            out = fseq.apply(bsamp)
 
-        self.base = base
-        self.output = out#*8000
-        self.fseq = fseq
-        self.logdens = base.logdens(bsamp) - fseq.calc_logj()
+            self.base = base
+            self.output = out#*8000
+            self.fseq = fseq
+            self.logdens = base.logdens(bsamp) - fseq.calc_logj()
+        else:
+            fseq[-1]()
+            self.base = None
+            self.output = fseq[-1].output
+            self.fseq = fseq
+            self.logdens = 0
         
     
 def Dense(inp, num_n, name='Dense', use_bias=True):
@@ -94,8 +101,20 @@ def Dense(inp, num_n, name='Dense', use_bias=True):
             
     return pa
 
+class CFlow:
+    def __init__(self, dim, name=None):
+        self.dim = dim
+        self.name = name
+
+    def __call__(self, inp_flows=None):
+        with tf.variable_scope(self.name, reuse=tf.AUTO_REUSE):
+            vals = tf.get_variable('W', shape=[self.dim], initializer=tf.random_normal_initializer(stddev=0.01), dtype=floatX)
+            self.output = vals
+            self.logj = 0
+        return FlowSequence([self])
+
 class Flow:
-    def __init__(self, dim=None, name=None, output=None, aux_vars=None):
+    def __init__(self, dim, name=None, output=None, aux_vars=None):
         self.dim = dim
         self.name = name
         self.output = output
