@@ -7,8 +7,8 @@ from .config import floatX
 phase = tf.placeholder_with_default(True, shape=(), name='learning_phase')
 
 def softbound(x):
-    b = 8.
-    a = -8.
+    b = 14.
+    a = -14.
     assert b > a
     return a + (b-a)*(tf.atan(x/(b-a)) + np.pi/2)/np.pi
     #return x
@@ -36,7 +36,9 @@ class FlowSequence(Sequence):
         return len(self.flows)
     
     def apply(self, inp, inverse=False):
-        init = NVPFlow(int(inp.shape[-1]), name='input_flow', output=inp)
+        init = Flow(int(inp.shape[-1]), name='init_flow')
+        init.output = inp
+        init.logj = 0
         
         f = init
         ops = []
@@ -78,7 +80,7 @@ class DFlow:
             out = fseq.apply(bsamp)
 
             self.base = base
-            self.output = out#*8000
+            self.output = out
             self.fseq = fseq
             self.logdens = base.logdens(bsamp) - fseq.calc_logj()
         else:
@@ -114,42 +116,55 @@ class CFlow:
         return FlowSequence([self])
 
 class Flow:
-    def __init__(self, dim, name=None, output=None, aux_vars=None):
+    def __init__(self, dim=None, name=None, aux_vars=None):
         self.dim = dim
         self.name = name
-        self.output = output
         self.aux_vars = aux_vars
-        if output is not None:
-            self.mask = np.zeros(dim, np.bool)
 
-    @staticmethod
-    def _calc_mask(inp_flows):
-        dim = inp_flows[-1].mask.shape[0]
+    def __call__(self, inp_flows=None):
+        if isinstance(inp_flows, FlowSequence):
+            dim = int(inp_flows[-1].dim)
+            assert (self.dim is None) or (self.dim == dim)
+            self.dim = dim
+        elif isinstance(inp_flows, Flow):
+            dim = inp_flows.dim
+            inp_flows = FlowSequence([inp_flows])
+            assert (self.dim is None) or (self.dim == dim)
+            self.dim = dim
+        elif isinstance(inp_flows, tf.Tensor) or isinstance(inp_flows, tf.Variable):
+            assert self.dim is not None
+            fl = Flow(self.dim, 'input_flow')
+            fl.output = inp_flows
+            fl.logj = 0
+            inp_flows = FlowSequence([fl])
+        else:
+            raise ValueError('Input flow must be either a flowsequence, a flow or a tensor')
+
+        if self.dim is None:
+            raise ValueError
+        return inp_flows
+
+class MaskedFlow(Flow):
+    def __init__(self, dim, name=None, aux_vars=None):
+        super().__init__(dim, name, aux_vars)
+
+    def _calc_mask(self, inp_flows):
+        dim = self.dim
 
         prev_cover = np.zeros(dim, np.int)
         for flow in inp_flows:
-            prev_cover += flow.mask
+            if isinstance(flow, MaskedFlow):
+                prev_cover += flow.mask
 
         least_covered = np.argsort(prev_cover)
         mask = np.zeros(dim, np.bool)
-
         for i in least_covered[:min(len(least_covered)//2 + 1, dim-1)]:
             mask[i] = True
-        
         return mask
 
     def __call__(self, inp_flows=None, inverse=False):
+        inp_flows = super().__call__(inp_flows)
 
-        if isinstance(inp_flows, FlowSequence):
-            dim = int(inp_flows[-1].dim)
-        elif isinstance(inp_flows, NVPFlow):
-            dim = inp_flows.dim
-            inp_flows = FlowSequence([inp_flows])
-        else:
-            raise ValueError('Input flow must be either a flowsequence or a flow')
-
-        self.dim = dim
-        
         if inp_flows is None:
             if hasattr(self, 'mask'):
                 mask = self.mask
@@ -157,23 +172,21 @@ class Flow:
                 mask = np.zeros(dim, np.bool)
                 mask[:dim//2] = True
                 self.mask = mask
-                
         else:
             if hasattr(self, 'mask'):
                 mask = self.mask
-                
             else:
-                mask = self._calc_mask(inp_flows)
-                self.mask = mask
+                self.mask = self._calc_mask(inp_flows)
         return inp_flows
 
 class Linear(Flow):
-    def __init__(self, dim=None, name='LinFlow', output=None, aux_vars=None):
-        super().__init__(dim, name, output, aux_vars)
+    def __init__(self, dim=None, name='LinFlow'):
+        super().__init__(dim, name)
 
     def __call__(self, inp_flows=None, inverse=False):
         inp_flows = super().__call__(inp_flows, inverse)
         dim = self.dim
+        
         if inp_flows is None:
             out_flows = FlowSequence([self])
         else:
@@ -193,9 +206,9 @@ class Linear(Flow):
         return out_flows
 
 
-class NVPFlow(Flow):
-    def __init__(self, dim=None, name='NVPFlow', output=None, aux_vars=None):
-        super().__init__(dim, name, output, aux_vars)
+class NVPFlow(MaskedFlow):
+    def __init__(self, dim=None, name='NVPFlow', aux_vars=None):
+        super().__init__(dim, name, aux_vars)
 
     def __call__(self, inp_flows=None, inverse=False):
         inp_flows = super().__call__(inp_flows, inverse)
@@ -237,9 +250,9 @@ class NVPFlow(Flow):
             
         return out_flows
     
-class ResFlow(Flow):
-    def __init__(self, dim=None, name='ResFlow', output=None, aux_vars=None):
-        super().__init__(dim,name,output, aux_vars)
+class ResFlow(MaskedFlow):
+    def __init__(self, dim=None, name='ResFlow', aux_vars=None):
+        super().__init__(dim, name, aux_vars)
         
     def __call__(self, inp_flows=None, inverse=False):
         inp_flows = super().__call__(inp_flows, inverse)
@@ -288,7 +301,7 @@ class ResFlow(Flow):
     
 class BNFlow(Flow):
     def __init__(self, dim=None, name='BNFlow', output=None):
-        super().__init__(dim,name,output,None)
+        super().__init__(dim,name)
         self.gamma = 0.99
     
     def _update_stats(self, inp_tensor):
@@ -312,10 +325,8 @@ class BNFlow(Flow):
         self.stats = [mean, mean2-tf.square(mean)]
         
     def __call__(self, inp_flows=None, inverse=False):
-        inp_flows = super().__call__(inp_flows, inverse) 
+        inp_flows = super().__call__(inp_flows) 
         dim = self.dim
-        
-        self.mask = np.zeros(dim, np.bool)
 
         out_flows = inp_flows.add(self)
         prev_flow_output = inp_flows[-1].output

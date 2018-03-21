@@ -43,7 +43,7 @@ class NormalRW(Normal):
     def logdens(self, x, mean=False, full_reduce=True):
         assert len(x.shape) >= 2
         norms = x[:,1:] - x[:,:-1]
-        ll = super().logdens(norms, mean, full_reduce) + self.init_distr.logdens(x[:,0:1], mean, full_reduce)
+        ll = super().logdens(norms, mean, full_reduce) + self.init_distr.logdens(x[:,0], mean, full_reduce)
         return ll
     
     def sample(self):
