@@ -184,7 +184,7 @@ class Linear(Flow):
         super().__init__(dim, name)
 
     def __call__(self, inp_flows=None, inverse=False):
-        inp_flows = super().__call__(inp_flows, inverse)
+        inp_flows = super().__call__(inp_flows)
         dim = self.dim
         
         if inp_flows is None:
