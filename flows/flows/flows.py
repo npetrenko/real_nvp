@@ -71,12 +71,12 @@ class FlowSequence(Sequence):
 
 class DFlow:
     def __init__(self, flows, init_sigma=1.):
-        base = Normal(flows[-1].dim, sigma=init_sigma)
+        base = Normal([1, flows[-1].dim], sigma=init_sigma)
 
         fseq = FlowSequence(flows)
 
         if not isinstance(fseq[-1], CFlow):
-            bsamp = base.sample()[tf.newaxis,:]
+            bsamp = base.sample()
             out = fseq.apply(bsamp)
 
             self.base = base

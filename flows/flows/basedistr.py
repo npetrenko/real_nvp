@@ -33,7 +33,7 @@ class Normal(Distribution):
             return tf.reduce_sum(tmp, idx)
 
     def sample(self):
-        return tf.random_normal([self.dim], self.mu, self.sigma, dtype=floatX)
+        return tf.random_normal(self.dim, self.mu, self.sigma, dtype=floatX)
 
 class NormalRW(Normal):
     def __init__(self, dim, mu=0, sigma=1, mu0=0, sigma0=1):
