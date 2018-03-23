@@ -27,7 +27,7 @@ class Normal(Distribution):
         if full_reduce:
             idx = list(range(len(tmp.shape)))
         else:
-            idx = [-1]
+            idx = [-1] if len(tmp.shape) != 0 else []
 
         if mean:
             return tf.reduce_mean(tmp, idx)
@@ -78,7 +78,7 @@ class MVNormal(Distribution):
             if full_reduce:
                 idx = list(range(len(tmp.shape)))
             else:
-                idx = [-1]
+                idx = [-1] if len(tmp.shape) != 0 else []
 
             if mean:
                 return tf.reduce_mean(tmp, idx)
