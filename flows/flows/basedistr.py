@@ -58,7 +58,7 @@ class MVNormal(Distribution):
             #lowerd = tf.get_variable('lowerd', initializer=tf.zeros([self.dim*(self.dim - 1)//2], dtype=floatX))
             lowerd = tf.get_variable('lowerd', initializer=np.random.normal(size=[self.dim + self.dim*(self.dim - 1)//2]).astype(floatX))
 
-            ldiag = tf.get_variable('ldiag', initializer=np.array([np.log(sigma)]*self.dim, dtype=floatX))
+            ldiag = tf.get_variable('ldiag', initializer=np.array([-np.log(sigma)]*self.dim, dtype=floatX))
             diag_mask = tf.constant(np.diag(np.ones(self.dim)), name='diag_mask', dtype=floatX)
 
             diag = tf.diag(tf.exp(ldiag))
