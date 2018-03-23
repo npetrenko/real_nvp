@@ -52,13 +52,15 @@ class NormalRW(Normal):
         raise NotImplementedError
 
 class MVNormal(Distribution):
-    def __init__(self, dim, sigma=1, name='mvn'):
+    def __init__(self, dim, sigma=1, name='mvn', lowerd=None, ldiag=None):
         super().__init__(dim, name)
         with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
-            #lowerd = tf.get_variable('lowerd', initializer=tf.zeros([self.dim*(self.dim - 1)//2], dtype=floatX))
-            lowerd = tf.get_variable('lowerd', initializer=np.random.normal(size=[self.dim + self.dim*(self.dim - 1)//2]).astype(floatX))
+            if lowerd is None:
+                lowerd = tf.get_variable('lowerd', initializer=tf.random_normal(shape=[self.dim + self.dim*(self.dim - 1)//2], dtype=floatX, stddev=0.05))
 
-            ldiag = tf.get_variable('ldiag', initializer=np.array([-np.log(sigma)]*self.dim, dtype=floatX))
+            if ldiag is None:
+                ldiag = tf.get_variable('ldiag', initializer=np.array([-np.log(sigma)]*self.dim, dtype=floatX))
+
             diag_mask = tf.constant(np.diag(np.ones(self.dim)), name='diag_mask', dtype=floatX)
 
             diag = tf.diag(tf.exp(ldiag))
@@ -86,8 +88,8 @@ class MVNormal(Distribution):
                 return tf.reduce_sum(tmp, idx)
 
 class MVNormalRW(MVNormal):
-    def __init__(self, dim, sigma=1, sigma0=1, name='mvn_rw'):
-        super().__init__(dim=dim, sigma=sigma, name=name)
+    def __init__(self, dim, sigma=1, sigma0=1, name='mvn_rw', lowerd=None, ldiag=None):
+        super().__init__(dim=dim, sigma=sigma, name=name, lowerd=lowerd, ldiag=ldiag)
         with tf.variable_scope(name, tf.AUTO_REUSE):
             self.init_distr = MVNormal(dim, sigma0, name='init_distr')
 
