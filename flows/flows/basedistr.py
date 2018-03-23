@@ -4,8 +4,9 @@ from .config import floatX
 from tensorflow.python.ops.distributions.util import fill_triangular
 
 class Distribution:
-    def __init__(self):
-        pass
+    def __init__(self, dim=None, name=None):
+        self.dim = dim
+        self.name = name
     def logdens(self, x):
         raise NotImplementedError
     def sample(self):
@@ -13,9 +14,9 @@ class Distribution:
 
 class Normal(Distribution):
     def __init__(self, dim, mu=0, sigma=1):
+        super().__init__(dim)
         self.sigma = np.array(sigma, dtype=floatX)
         self.mu = np.array(mu, dtype=floatX)
-        self.dim = dim
 
     def logdens(self, x, mean=False, full_reduce=True):
         s2 = tf.square(self.sigma)
@@ -51,9 +52,9 @@ class NormalRW(Normal):
         raise NotImplementedError
 
 class MVNormal(Distribution):
-    def __init__(self, dim, sigma=1):
-        self.dim = dim
-        with tf.variable_scope('mvnormal', reuse=False):
+    def __init__(self, dim, sigma=1, name='mvn'):
+        super().__init__(dim, name)
+        with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
             #lowerd = tf.get_variable('lowerd', initializer=tf.zeros([self.dim*(self.dim - 1)//2], dtype=floatX))
             lowerd = tf.get_variable('lowerd', initializer=np.random.normal(size=[self.dim + self.dim*(self.dim - 1)//2]).astype(floatX))
 
@@ -70,29 +71,33 @@ class MVNormal(Distribution):
             self.fsigma = fsigma
 
     def logdens(self, x, mean=False, full_reduce=True):
-        norms = tf.reduce_sum(tf.square(tf.tensordot(x, self.fsigma, [[-1], [0]])), axis=-1)
-        tmp = -0.5*norms - (self.dim/2)*np.log(2*np.pi) - 0.5*self.logdet
-        
-        if full_reduce:
-            idx = list(range(len(tmp.shape)))
-        else:
-            idx = [-1]
+        with tf.name_scope(self.name):
+            norms = tf.reduce_sum(tf.square(tf.tensordot(x, self.fsigma, [[-1], [0]])), axis=-1)
+            tmp = -0.5*norms - (self.dim/2)*np.log(2*np.pi) - 0.5*self.logdet
+            
+            if full_reduce:
+                idx = list(range(len(tmp.shape)))
+            else:
+                idx = [-1]
 
-        if mean:
-            return tf.reduce_mean(tmp, idx)
-        else:
-            return tf.reduce_sum(tmp, idx)
+            if mean:
+                return tf.reduce_mean(tmp, idx)
+            else:
+                return tf.reduce_sum(tmp, idx)
 
 class MVNormalRW(MVNormal):
-    def __init__(self, dim, sigma=1, sigma0=1):
-        super().__init__(dim, sigma)
-        self.init_distr = MVNormal(dim, sigma0)
+    def __init__(self, dim, sigma=1, sigma0=1, name='mvn_rw'):
+        super().__init__(dim=dim, sigma=sigma, name=name)
+        with tf.variable_scope(name, tf.AUTO_REUSE):
+            self.init_distr = MVNormal(dim, sigma0, name='init_distr')
 
     def logdens(self, x, mean=False, full_reduce=True):
         assert len(x.shape) >= 2
-        norms = x[:,1:] - x[:,:-1]
-        ll = super().logdens(norms, mean, full_reduce) + self.init_distr.logdens(x[:,0], mean, full_reduce)
-        return ll
+        with tf.name_scope(self.name):
+            with tf.name_scope('logdens'):
+                norms = x[:,1:] - x[:,:-1]
+                ll = super().logdens(norms, mean, full_reduce) + self.init_distr.logdens(x[:,0], mean, full_reduce)
+            return ll
     
     def sample(self):
         raise NotImplementedError
