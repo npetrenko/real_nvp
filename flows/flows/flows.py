@@ -42,7 +42,6 @@ class FlowSequence(Sequence):
         init.logj = 0
         
         f = init
-        ops = []
         
         if not inverse:
             for flow in self.flows:
@@ -51,8 +50,6 @@ class FlowSequence(Sequence):
         else:
             for flow in self.flows[::-1]:
                 f = flow(f, inverse=True)
-                    
-        self.ops = ops
                 
         logj = 0
         for flow in self.flows:
@@ -122,7 +119,7 @@ class Flow:
         self.name = name
         self.aux_vars = aux_vars
 
-    def __call__(self, inp_flows=None):
+    def __call__(self, inp_flows=None, inverse=None):
         if isinstance(inp_flows, FlowSequence):
             dim = int(inp_flows[-1].dim)
             assert (self.dim is None) or (self.dim == dim)
@@ -157,7 +154,7 @@ class MaskedFlow(Flow):
             if isinstance(flow, MaskedFlow):
                 prev_cover += flow.mask
 
-        if random.random() < 0.5:
+        if random.random() < 0.8:
             least_covered = np.argsort(prev_cover)
             mask = np.zeros(dim, np.bool)
             for i in least_covered[:min(len(least_covered)//2 + 1, dim-1)]:
