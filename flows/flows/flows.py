@@ -8,8 +8,8 @@ import random
 phase = tf.placeholder_with_default(True, shape=(), name='learning_phase')
 
 def softbound(x):
-    b = 14.
-    a = -14.
+    b = 8.
+    a = -8.
     assert b > a
     return a + (b-a)*(tf.atan(x/(b-a)) + np.pi/2)/np.pi
     #return x
@@ -102,6 +102,9 @@ def Dense(inp, num_n, name='Dense', use_bias=True):
     return pa
 
 class CFlow:
+    '''
+    Flow fo max likelihood inference
+    '''
     def __init__(self, dim, name=None):
         self.dim = dim
         self.name = name
@@ -110,7 +113,7 @@ class CFlow:
         with tf.variable_scope(self.name, reuse=tf.AUTO_REUSE):
             vals = tf.get_variable('W', shape=[self.dim], initializer=tf.random_normal_initializer(stddev=0.01), dtype=floatX)
             self.output = vals
-            self.logj = 0
+            self.logj = tf.constant(0, dtype=floatX)
         return FlowSequence([self])
 
 class Flow:
@@ -133,7 +136,7 @@ class Flow:
             assert self.dim is not None
             fl = Flow(self.dim, 'input_flow')
             fl.output = inp_flows
-            fl.logj = 0
+            fl.logj = tf.constant(0, dtype=floatX)
             inp_flows = FlowSequence([fl])
         else:
             raise ValueError('Input flow must be either a flowsequence, a flow or a tensor')
@@ -183,16 +186,12 @@ class MaskedFlow(Flow):
         inp_flows = super().__call__(inp_flows)
 
         if inp_flows is None:
-            if hasattr(self, 'mask'):
-                mask = self.mask
-            else:
+            if not hasattr(self, 'mask'):
                 mask = np.zeros(dim, np.bool)
                 mask[:dim//2] = True
                 self.mask = mask
         else:
-            if hasattr(self, 'mask'):
-                mask = self.mask
-            else:
+            if not hasattr(self, 'mask'):
                 self.mask = self._calc_mask(inp_flows)
         return inp_flows
 
@@ -208,6 +207,7 @@ class Linear(Flow):
             out_flows = FlowSequence([self])
         else:
             out_flows = inp_flows.add(self)
+
         prev_flow_output = inp_flows[-1].output
         with tf.variable_scope(self.name, reuse=tf.AUTO_REUSE, dtype=floatX):
             W = tf.get_variable('W', initializer=tf.zeros([1, self.dim], dtype=floatX))
