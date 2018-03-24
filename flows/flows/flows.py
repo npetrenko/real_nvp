@@ -2,10 +2,10 @@ import tensorflow as tf
 import numpy as np
 from collections.abc import Sequence
 from .basedistr import *
-from .config import floatX
+from .config import floatX, phase
 import random
+from .batchnorm import Normalizer
 
-phase = tf.placeholder_with_default(True, shape=(), name='learning_phase')
 
 def softbound(x):
     b = 8.
@@ -19,11 +19,12 @@ class FlowSequence(Sequence):
         self.flows = flows
         super().__init__()
         
+    def get_ops(self):
         ops = []
-        for flow in flows:
+        for flow in self.flows:
             if hasattr(flow, 'ops'):
                 ops += flow.ops
-        self.ops = ops
+        return ops
         
     def add(self, flow):
         flows = self.flows[:]
@@ -224,8 +225,11 @@ class Linear(Flow):
 
 
 class NVPFlow(MaskedFlow):
-    def __init__(self, dim=None, name='NVPFlow', aux_vars=None):
+    def __init__(self, dim=None, name='NVPFlow', aux_vars=None, normalize=False):
         super().__init__(dim, name, aux_vars)
+        self.normalize = normalize
+        if normalize:
+            self.normalizer = Normalizer()
 
     def __call__(self, inp_flows=None, inverse=False):
         inp_flows = super().__call__(inp_flows, inverse)
@@ -250,8 +254,13 @@ class NVPFlow(MaskedFlow):
                 blend_tensor_full = tf.concat([blend_tensor, self.aux_vars], axis=-1)
             else:
                 blend_tensor_full = blend_tensor
-            
+
             gate = Dense(blend_tensor_full, dim, name='preelastic')
+
+            if self.normalize:
+                gate = self.normalizer(gate, inverse=False)/10
+                self.ops = self.normalizer.ops
+
             transition = Dense(blend_tensor_full, dim, name='transition')
             gate = softbound(gate)
             
@@ -268,8 +277,11 @@ class NVPFlow(MaskedFlow):
         return out_flows
     
 class ResFlow(MaskedFlow):
-    def __init__(self, dim=None, name='ResFlow', aux_vars=None):
+    def __init__(self, dim=None, name='ResFlow', aux_vars=None, normalize=False):
         super().__init__(dim, name, aux_vars)
+        self.normalize = normalize
+        if normalize:
+            self.normalizer = Normalizer()
         
     def __call__(self, inp_flows=None, inverse=False):
         inp_flows = super().__call__(inp_flows, inverse)
@@ -295,8 +307,14 @@ class ResFlow(MaskedFlow):
                 blend_tensor_full = tf.concat([blend_tensor, self.aux_vars], axis=-1)
             else:
                 blend_tensor_full = blend_tensor
-            
+
             gate = Dense(blend_tensor_full, dim, name='preelastic')
+
+            if self.normalize:
+                gate = self.normalizer(gate, inverse=False)/10
+                tf.summary.histogram('gate_' + self.name, gate)
+                self.ops = self.normalizer.ops
+
             gate = softbound(gate)
             gate = tf.exp(gate)
             
