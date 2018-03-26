@@ -2,10 +2,10 @@ import tensorflow as tf
 import numpy as np
 from collections.abc import Sequence
 from .basedistr import *
+from .fcns import *
 from .config import floatX, phase
 import random
 from .batchnorm import Normalizer
-
 
 def softbound(x):
     b = 8.
@@ -90,18 +90,6 @@ class DFlow:
             self.logdens = 0
         
     
-def Dense(inp, num_n, name='Dense', use_bias=True):
-    with tf.variable_scope(name, initializer=tf.random_normal_initializer(stddev=0.01, dtype=floatX)):
-        inp_dim = int(inp.shape[-1])
-        W = tf.get_variable('W', [inp_dim, num_n], dtype=floatX)
-        pa = tf.matmul(inp, W)
-        
-        if use_bias:
-            b = tf.get_variable('b', [1, num_n], dtype=floatX)
-            pa += b
-            
-    return pa
-
 class CFlow:
     '''
     Flow fo max likelihood inference
@@ -154,16 +142,21 @@ class MaskedFlow(Flow):
         dim = self.dim
 
         prev_cover = np.zeros(dim, np.int)
+        alts = 0.
         for flow in inp_flows:
             if isinstance(flow, MaskedFlow):
                 prev_cover += flow.mask
+                alts += flow.alternate
+        alts = alts/len(inp_flows)
 
-        if random.random() < 0.8:
+        if True:   #(np.min(prev_cover) < 4) or (random.random() < 0.5) or (alts > 0.33):
+            self.alternate = False
             least_covered = np.argsort(prev_cover)
             mask = np.zeros(dim, np.bool)
             for i in least_covered[:min(len(least_covered)//2 + 1, dim-1)]:
                 mask[i] = True
         else:
+            self.alternate = True
             uncovered = np.logical_not(prev_cover.astype('bool'))
             mask = uncovered
 
@@ -229,7 +222,8 @@ class NVPFlow(MaskedFlow):
         super().__init__(dim, name, aux_vars)
         self.normalize = normalize
         if normalize:
-            self.normalizer = Normalizer()
+            self.gate_normalizer = Normalizer(name='gate_norm')
+            self.trans_normalizer = Normalizer(name='trans_norm')
 
     def __call__(self, inp_flows=None, inverse=False):
         inp_flows = super().__call__(inp_flows, inverse)
@@ -255,13 +249,15 @@ class NVPFlow(MaskedFlow):
             else:
                 blend_tensor_full = blend_tensor
 
-            gate = Dense(blend_tensor_full, dim, name='preelastic')
+            gate = FCN(blend_tensor_full, dim, name='preelastic')
+
+            transition = FCN(blend_tensor_full, dim, name='transition')
 
             if self.normalize:
-                gate = self.normalizer(gate, inverse=False)/10
-                self.ops = self.normalizer.ops
+                gate = self.gate_normalizer(gate, inverse=False)/10
+                transition = self.trans_normalizer(transition, inverse=False)/10
+                self.ops = self.gate_normalizer.ops + self.trans_normalizer.ops
 
-            transition = Dense(blend_tensor_full, dim, name='transition')
             gate = softbound(gate)
             
             if not inverse:
@@ -281,7 +277,8 @@ class ResFlow(MaskedFlow):
         super().__init__(dim, name, aux_vars)
         self.normalize = normalize
         if normalize:
-            self.normalizer = Normalizer()
+            self.gate_normalizer = Normalizer(name='gate_norm')
+            self.trans_normalizer = Normalizer(name='trans_norm')
         
     def __call__(self, inp_flows=None, inverse=False):
         inp_flows = super().__call__(inp_flows, inverse)
@@ -308,17 +305,17 @@ class ResFlow(MaskedFlow):
             else:
                 blend_tensor_full = blend_tensor
 
-            gate = Dense(blend_tensor_full, dim, name='preelastic')
-
-            if self.normalize:
-                gate = self.normalizer(gate, inverse=False)/10
-                tf.summary.histogram('gate_' + self.name, gate)
-                self.ops = self.normalizer.ops
+            gate = FCN(blend_tensor_full, dim, name='preelastic')
 
             gate = softbound(gate)
+            transition = FCN(blend_tensor_full, dim, name='transition')
+
+            if self.normalize:
+                gate = self.gate_normalizer(gate, inverse=False)/10
+                transition = self.trans_normalizer(transition, inverse=False)/10
+                self.ops = self.gate_normalizer.ops + self.trans_normalizer.ops
+
             gate = tf.exp(gate)
-            
-            transition = Dense(blend_tensor_full, dim, name='transition')
             
             if not inverse:
                 transformed = gate*input_tensor + transition
