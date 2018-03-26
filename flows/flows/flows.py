@@ -221,6 +221,7 @@ class NVPFlow(MaskedFlow):
     def __init__(self, dim=None, name='NVPFlow', aux_vars=None, normalize=False):
         super().__init__(dim, name, aux_vars)
         self.normalize = normalize
+        self.default_hidden = 20
         if normalize:
             self.gate_normalizer = Normalizer(name='gate_norm')
             self.trans_normalizer = Normalizer(name='trans_norm')
@@ -249,9 +250,8 @@ class NVPFlow(MaskedFlow):
             else:
                 blend_tensor_full = blend_tensor
 
-            gate = FCN(blend_tensor_full, dim, name='preelastic')
-
-            transition = FCN(blend_tensor_full, dim, name='transition')
+            gate = FCN(blend_tensor_full, dim, num_hidden=max(self.default_hidden, self.dim*2), name='preelastic')
+            transition = FCN(blend_tensor_full, dim, num_hidden=max(self.default_hidden, self.dim*2), name='transition')
 
             if self.normalize:
                 gate = self.gate_normalizer(gate, inverse=False)/10
@@ -276,6 +276,7 @@ class ResFlow(MaskedFlow):
     def __init__(self, dim=None, name='ResFlow', aux_vars=None, normalize=False):
         super().__init__(dim, name, aux_vars)
         self.normalize = normalize
+        self.default_hidden = 20
         if normalize:
             self.gate_normalizer = Normalizer(name='gate_norm')
             self.trans_normalizer = Normalizer(name='trans_norm')
@@ -296,8 +297,6 @@ class ResFlow(MaskedFlow):
             
             mask = mask[np.newaxis,:]
             
-            input_tensor = prev_flow_output*mask
-            
             blend_tensor = prev_flow_output*(1 - mask)
             
             if self.aux_vars is not None:
@@ -305,10 +304,10 @@ class ResFlow(MaskedFlow):
             else:
                 blend_tensor_full = blend_tensor
 
-            gate = FCN(blend_tensor_full, dim, name='preelastic')
+            gate = FCN(blend_tensor_full, dim, num_hidden=max(self.default_hidden, self.dim*2), name='preelastic')
+            transition = FCN(blend_tensor_full, dim, num_hidden=max(self.default_hidden, self.dim*2), name='transition')
 
             gate = softbound(gate)
-            transition = FCN(blend_tensor_full, dim, name='transition')
 
             if self.normalize:
                 gate = self.gate_normalizer(gate, inverse=False)/10
@@ -318,17 +317,17 @@ class ResFlow(MaskedFlow):
             gate = tf.exp(gate)
             
             if not inverse:
-                transformed = gate*input_tensor + transition
+                transformed = gate*prev_flow_output + transition
                 self.output = transformed * mask + blend_tensor * (1-mask)
                 
-                self.output += inp_flows[-1].output
+                self.output += prev_flow_output
                 self.output /= 2
                 
             else:
-                restored = 2*(input_tensor - 0.5*transition)/(gate + 1)
+                restored = 2*(prev_flow_output - 0.5*transition)/(gate + 1)
                 self.output = mask*restored + (1-mask)*blend_tensor
             
-            self.logj =  tf.reduce_sum(tf.log1p(gate*mask) - np.log(2), axis=-1)
+            self.logj =  tf.reduce_sum(tf.log1p(gate*mask) - np.log(2)*mask, axis=-1)
         return out_flows
     
 class BNFlow(Flow):
