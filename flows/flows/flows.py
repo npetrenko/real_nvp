@@ -134,6 +134,47 @@ class Flow:
             raise ValueError
         return inp_flows
 
+class LinearChol(Flow):
+    def __init__(self, dim, name=None, aux_vars=None):
+        super().__init__(dim, name, aux_vars)
+
+    def __call__(self, inp_flows, inverse=False):
+        inp_flows = super().__call__(inp_flows)
+        dim = self.dim
+        
+        if inp_flows is None:
+            out_flows = FlowSequence([self])
+        else:
+            out_flows = inp_flows.add(self)
+
+        prev_flow_output = inp_flows[-1].output
+
+        with tf.variable_scope(self.name, reuse=tf.AUTO_REUSE):
+            lowerd = tf.get_variable('lowerd', initializer=tf.random_normal(shape=[self.dim + self.dim*(self.dim - 1)//2], dtype=floatX, stddev=0.05))
+            ldiag = tf.get_variable('ldiag', initializer=np.zeros(self.dim, dtype=floatX))
+            bias = tf.get_variable('bias', initializer=np.zeros([1,self.dim], dtype=floatX))
+
+            diag_mask = tf.constant(np.diag(np.ones(self.dim)), name='diag_mask', dtype=floatX)
+
+            diag = tf.diag(tf.exp(ldiag))
+            fsigma = fill_triangular(lowerd)*(1-diag_mask) + diag
+
+            self.logj = tf.reduce_sum(ldiag)
+
+            output = tf.matmul(prev_flow_output, fsigma) + bias
+
+            if self.aux_vars is not None:
+                sh = int(self.aux_vars.shape[-1])
+                #assert sh == self.dim
+                W = tf.get_variable('W', initializer=tf.random_normal([sh, self.dim], stddev=0.01, dtype=floatX))#tf.diag(np.ones(self.dim, dtype=floatX)))
+                output += tf.matmul(self.aux_vars, W)
+            
+            if inverse:
+                raise NotImplementedError
+
+            self.output = output
+        return out_flows
+
 class MaskedFlow(Flow):
     def __init__(self, dim, name=None, aux_vars=None):
         super().__init__(dim, name, aux_vars)
