@@ -164,10 +164,10 @@ class LinearChol(Flow):
             output = tf.matmul(prev_flow_output, fsigma) + bias
 
             if self.aux_vars is not None:
-                sh = int(self.aux_vars.shape[-1])
-                #assert sh == self.dim
-                W = tf.get_variable('W', initializer=tf.random_normal([sh, self.dim], stddev=0.01, dtype=floatX))#tf.diag(np.ones(self.dim, dtype=floatX)))
-                output += tf.matmul(self.aux_vars, W)
+                aux = self.aux_vars#aux = tf.concat([self.aux_vars, tf.exp(self.aux_vars)], axis=-1)
+                sh = int(aux.shape[-1])
+                W = tf.get_variable('W', initializer=tf.random_normal([sh, self.dim], stddev=0.01, dtype=floatX))
+                output += tf.matmul(aux, W)
             
             if inverse:
                 raise NotImplementedError
