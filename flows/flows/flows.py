@@ -38,9 +38,10 @@ class FlowSequence(Sequence):
         return len(self.flows)
     
     def apply(self, inp, inverse=False):
-        init = Flow(int(inp.shape[-1]), name='init_flow')
-        init.output = inp
-        init.logj = 0
+        if not isinstance(inp, Flow):
+            init = Flow(int(inp.shape[-1]), name='init_flow')
+            init.output = inp
+            init.logj = 0
         
         f = init
         
@@ -69,19 +70,28 @@ class FlowSequence(Sequence):
         return logj
 
 class DFlow:
-    def __init__(self, flows, init_sigma=1.):
-        base = Normal([1, flows[-1].dim], sigma=init_sigma)
+    def __init__(self, flows, init_sigma=1., base=None):
+        if base is None:
+            base = Normal([1, flows[-1].dim], sigma=init_sigma)
 
         fseq = FlowSequence(flows)
 
         if not isinstance(fseq[-1], CFlow):
-            bsamp = base.sample()
+            if isinstance(base, Distribution):
+                bsamp = base.sample()
+                bld = base.logdens(bsamp)
+            elif isinstance(base, Flow):
+                bsamp = base.output
+                bld = base.logj[0]
+            else:
+                raise NotImplementedError
+
             out = fseq.apply(bsamp)
 
             self.base = base
             self.output = out
             self.fseq = fseq
-            self.logdens = base.logdens(bsamp) - fseq.calc_logj()
+            self.logdens = bld - fseq.calc_logj()
         else:
             fseq[-1]()
             self.base = None
@@ -150,8 +160,8 @@ class LinearChol(Flow):
         prev_flow_output = inp_flows[-1].output
 
         with tf.variable_scope(self.name, reuse=tf.AUTO_REUSE):
-            lowerd = tf.get_variable('lowerd', initializer=tf.random_normal(shape=[self.dim + self.dim*(self.dim - 1)//2], dtype=floatX, stddev=0.05))
-            ldiag = tf.get_variable('ldiag', initializer=np.zeros(self.dim, dtype=floatX))
+            lowerd = tf.get_variable('lowerd', initializer=tf.random_normal(shape=[self.dim + self.dim*(self.dim - 1)//2], dtype=floatX, stddev=0.001))
+            ldiag = tf.get_variable('ldiag', initializer=tf.random_normal(shape=[self.dim], dtype=floatX, stddev=0.001))
             bias = tf.get_variable('bias', initializer=np.zeros([1,self.dim], dtype=floatX))
 
             diag_mask = tf.constant(np.diag(np.ones(self.dim)), name='diag_mask', dtype=floatX)
@@ -164,9 +174,9 @@ class LinearChol(Flow):
             output = tf.matmul(prev_flow_output, fsigma) + bias
 
             if self.aux_vars is not None:
-                aux = self.aux_vars#aux = tf.concat([self.aux_vars, tf.exp(self.aux_vars)], axis=-1)
+                aux = self.aux_vars
                 sh = int(aux.shape[-1])
-                W = tf.get_variable('W', initializer=tf.random_normal([sh, self.dim], stddev=0.01, dtype=floatX))
+                W = tf.get_variable('W', initializer=tf.random_normal([sh, self.dim], stddev=0.001, dtype=floatX))
                 output += tf.matmul(aux, W)
             
             if inverse:
