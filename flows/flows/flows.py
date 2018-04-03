@@ -145,8 +145,9 @@ class Flow:
         return inp_flows
 
 class LinearChol(Flow):
-    def __init__(self, dim, name=None, aux_vars=None):
+    def __init__(self, dim, name=None, aux_vars=None, use_bias=True):
         super().__init__(dim, name, aux_vars)
+        self.use_bias = use_bias
 
     def __call__(self, inp_flows, inverse=False):
         inp_flows = super().__call__(inp_flows)
@@ -162,7 +163,8 @@ class LinearChol(Flow):
         with tf.variable_scope(self.name, reuse=tf.AUTO_REUSE):
             lowerd = tf.get_variable('lowerd', initializer=tf.random_normal(shape=[self.dim + self.dim*(self.dim - 1)//2], dtype=floatX, stddev=0.001))
             ldiag = tf.get_variable('ldiag', initializer=tf.random_normal(shape=[self.dim], dtype=floatX, stddev=0.001))
-            bias = tf.get_variable('bias', initializer=np.zeros([1,self.dim], dtype=floatX))
+            if self.use_bias:
+                bias = tf.get_variable('bias', initializer=np.zeros([1,self.dim], dtype=floatX))
 
             diag_mask = tf.constant(np.diag(np.ones(self.dim)), name='diag_mask', dtype=floatX)
 
@@ -171,7 +173,9 @@ class LinearChol(Flow):
 
             self.logj = tf.reduce_sum(ldiag)
 
-            output = tf.matmul(prev_flow_output, fsigma) + bias
+            output = tf.matmul(prev_flow_output, fsigma)
+            if self.use_bias:
+                output += bias
 
             if self.aux_vars is not None:
                 aux = self.aux_vars
