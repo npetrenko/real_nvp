@@ -57,6 +57,8 @@ class MVNormal(Distribution):
         with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
             if lowerd is None:
                 lowerd = tf.get_variable('lowerd', initializer=tf.random_normal(shape=[self.dim + self.dim*(self.dim - 1)//2], dtype=floatX, stddev=0.05))
+            else:
+                print('Warning! Triengular part of lowerd is dropped and will cause problems with entropy calculations')
 
             if ldiag is None:
                 ldiag = tf.get_variable('ldiag', initializer=np.array([-np.log(sigma)]*self.dim, dtype=floatX))
