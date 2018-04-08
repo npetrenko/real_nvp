@@ -50,8 +50,8 @@ class NormalRW(Normal):
                 ll = super().logdens(norms, reduce) + self.init_distr.logdens(x[:,0], reduce)
                 return ll
             else:
-                init_dens = self.init_distr.logdens(x[:,0], reduce)[:,tf.newaxis]
-                cont_dens = super().logdens(norms, reduce)
+                init_dens = tf.reduce_sum(self.init_distr.logdens(x[:,0], reduce)[:,tf.newaxis], axis=-1)
+                cont_dens = tf.reduce_sum(super().logdens(norms, reduce), axis=-1)
                 dens = tf.concat([init_dens, cont_dens], axis=1)
                 return dens
     
@@ -142,7 +142,7 @@ class DistLSTM:
         return out
     
     def logdens(self, seq):
-        with tf.variable_scope(self.scope, reuse=True):
+        with tf.variable_scope(self.scope, reuse=tf.AUTO_REUSE):
             batch_size, s_len = tf.shape(seq)[0], tf.shape(seq)[1]
 
             cell = self.cell
@@ -172,7 +172,7 @@ class DistLSTM:
             return -nll
         
     def sample(self):
-        with tf.variable_scope(self.scope, reuse=True):
+        with tf.variable_scope(self.scope, reuse=tf.AUTO_REUSE):
             init_sample = tf.distributions.Multinomial(total_count=1., logits=self.init_distr).sample()
             
             cell = self.cell
@@ -189,7 +189,7 @@ class DistLSTM:
                 post_step = tf.distributions.Multinomial(total_count=1., logits=post_step).sample()
                 return post_step, cell_step[1]
             
-            out,_ = tf.scan(lambda prev, _: step(prev), tf.range(40), initializer=init)
+            out,_ = tf.scan(lambda prev, _: step(prev), tf.range(self.sample_len-1), initializer=init)
             out = tf.transpose(out, [1,0,2])
             out = tf.concat([init_sample[:,tf.newaxis,:], out], axis=1)
             return out                
