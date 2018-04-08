@@ -105,3 +105,83 @@ class MVNormalRW(MVNormal):
     
     def sample(self):
         raise NotImplementedError
+
+class DistLSTM:
+    def __init__(self, dim, name='DistLSTM', sample_len=None, state_dim=64, num_layers=3, reuse=None):
+        self.dim = dim
+        self.name = name
+        self.reuse = reuse
+        self.sample_len = sample_len
+
+        if sample_len is None:
+            raise ValueError
+        
+        with tf.variable_scope(self.name, reuse=reuse) as scope:
+            cells = [tf.nn.rnn_cell.LSTMCell(state_dim, 
+                                                name='cell_{}'.format(i), 
+                                                activation=tf.nn.tanh) for i in range(num_layers)]
+            self.cell = tf.nn.rnn_cell.MultiRNNCell(cells)
+            self.post_cell = lambda x: self.dense(x, dim, name='d1')
+            self.init_dist = tf.get_variable('init_dist', [1,dim], initializer=tf.random_normal_initializer(stddev=0.01, mean=0.2))
+            
+            self.scope = scope
+        
+    def dense(self, inp, dim, name='dense'):
+        with tf.variable_scope(name, initializer=tf.random_normal_initializer(stddev=0.01), reuse=self.reuse):
+            W = tf.get_variable('W', [inp.shape[-1], dim])
+            b = tf.get_variable('b', [1, dim])
+            out = tf.matmul(inp, W) + b
+        return out
+    
+    def logdens(self, seq):
+        with tf.variable_scope(self.scope, reuse=True):
+            batch_size, s_len = tf.shape(seq)[0], tf.shape(seq)[1]
+
+            cell = self.cell
+
+            s_t = tf.transpose(seq, [1,0,2])
+            init_state = cell.zero_state(batch_size=batch_size, dtype=tf.float32)
+
+            init = (tf.zeros([batch_size, cell.state_size[0][0]]), init_state)
+            out,_ = tf.scan(lambda prev, x: cell(x, prev[1]), s_t, initializer=init)
+            out = tf.transpose(out, [1,0,2])
+            
+            out_dim = out.shape
+            
+            out = tf.reshape(out, [-1, out_dim[-1]])
+            out = self.post_cell(out)
+            out = tf.reshape(out, [batch_size, s_len, self.dim])
+            
+            preds = out[:,:-1]
+            target = seq[:,1:]
+                        
+            init_logits = tf.tile(self.init_dist, [batch_size,1])
+            init_nll = tf.nn.softmax_cross_entropy_with_logits_v2(labels=seq[:,0], logits=init_logits)
+            init_nll = init_nll[:,tf.newaxis]
+            
+            nll = tf.nn.softmax_cross_entropy_with_logits_v2(labels=target, logits=preds)
+            nll = tf.concat([init_nll, nll], axis=1)
+            return -nll
+        
+    def sample(self):
+        with tf.variable_scope(self.scope, reuse=True):
+            init_sample = tf.distributions.Multinomial(total_count=1., logits=self.init_dist).sample()
+            
+            cell = self.cell
+
+            init_state = cell.zero_state(batch_size=1, dtype=tf.float32)
+
+            init = (init_sample, init_state)
+            
+            def step(prev):
+                x = prev[0]
+                state = prev[1]
+                cell_step = cell(x, state)
+                post_step = self.post_cell(cell_step[0])
+                post_step = tf.distributions.Multinomial(total_count=1., logits=post_step).sample()
+                return post_step, cell_step[1]
+            
+            out,_ = tf.scan(lambda prev, _: step(prev), tf.range(40), initializer=init)
+            out = tf.transpose(out, [1,0,2])
+            out = tf.concat([init_sample[:,tf.newaxis,:], out], axis=1)
+            return out                
