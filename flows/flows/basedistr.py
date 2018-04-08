@@ -7,54 +7,61 @@ class Distribution:
     def __init__(self, dim=None, name=None):
         self.dim = dim
         self.name = name
+        self.scope = tf.VariableScope(None, name=name)
     def logdens(self, x):
         raise NotImplementedError
     def sample(self):
         raise NotImplementedError
 
 class Normal(Distribution):
-    def __init__(self, dim, mu=0, sigma=1):
-        super().__init__(dim)
+    def __init__(self, dim, mu=0, sigma=1, name='Normal'):
+        super().__init__(dim, name)
         self.sigma = np.array(sigma, dtype=floatX)
         self.mu = np.array(mu, dtype=floatX)
 
-    def logdens(self, x, mean=False, full_reduce=True):
-        s2 = tf.square(self.sigma)
+    def logdens(self, x, reduce=True):
+        with tf.variable_scope(self.scope):
+            s2 = tf.square(self.sigma)
 
-        denum = - 0.5 * tf.log(2*np.pi*s2)
-        tmp = -tf.square(x-self.mu)/(2*s2) + denum
-
-        if full_reduce:
-            idx = list(range(len(tmp.shape)))
-        else:
-            idx = [-1] if len(tmp.shape) != 0 else []
-
-        if mean:
-            return tf.reduce_mean(tmp, idx)
-        else:
-            return tf.reduce_sum(tmp, idx)
+            denum = - 0.5 * tf.log(2*np.pi*s2)
+            tmp = -tf.square(x-self.mu)/(2*s2) + denum
+            if reduce:
+                tmp = tf.reduce_sum(tmp)
+            return tmp
 
     def sample(self):
-        return tf.random_normal(self.dim, self.mu, self.sigma, dtype=floatX)
+        with tf.variable_scope(self.scope):
+            return tf.random_normal(self.dim, self.mu, self.sigma, dtype=floatX)
 
 class NormalRW(Normal):
-    def __init__(self, dim, mu=0, sigma=1, mu0=0, sigma0=1):
+    def __init__(self, dim, mu=0, sigma=1, mu0=0, sigma0=1, name='NormalRW'):
         super().__init__(dim, mu, sigma)
-        self.init_distr = Normal(None, mu0, sigma0)
+        Distribution.__init__(self, dim=dim, name=name)
 
-    def logdens(self, x, mean=False, full_reduce=True):
-        assert len(x.shape) >= 2
-        norms = x[:,1:] - x[:,:-1]
-        ll = super().logdens(norms, mean, full_reduce) + self.init_distr.logdens(x[:,0], mean, full_reduce)
-        return ll
+        print(self.scope)
+        with tf.variable_scope(self.scope):
+            self.init_distr = Normal(None, mu0, sigma0)
+
+    def logdens(self, x, reduce=True):
+        with tf.variable_scope(self.scope):
+            assert len(x.shape) >= 2
+            norms = x[:,1:] - x[:,:-1]
+            if reduce==True:
+                ll = super().logdens(norms, reduce) + self.init_distr.logdens(x[:,0], reduce)
+                return ll
+            else:
+                init_dens = self.init_distr.logdens(x[:,0], reduce)[:,tf.newaxis]
+                cont_dens = super().logdens(norms, reduce)
+                dens = tf.concat([init_dens, cont_dens], axis=1)
+                return dens
     
     def sample(self):
         raise NotImplementedError
 
 class MVNormal(Distribution):
-    def __init__(self, dim, sigma=1, name='mvn', lowerd=None, ldiag=None):
+    def __init__(self, dim, sigma=1, name='MVNormal', lowerd=None, ldiag=None):
         super().__init__(dim, name)
-        with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
+        with tf.variable_scope(self.scope):
             if lowerd is None:
                 lowerd = tf.get_variable('lowerd', initializer=tf.random_normal(shape=[self.dim + self.dim*(self.dim - 1)//2], dtype=floatX, stddev=0.05))
             else:
@@ -74,33 +81,34 @@ class MVNormal(Distribution):
             self.inverse_sigma = isigma
             self.fsigma = fsigma
 
-    def logdens(self, x, mean=False, full_reduce=True):
-        with tf.name_scope(self.name):
+    def logdens(self, x, reduce=True):
+        with tf.variable_scope(self.scope):
+            #reduction happens only on the last dimension:
             norms = tf.reduce_sum(tf.square(tf.tensordot(x, self.fsigma, [[-1], [0]])), axis=-1)
             tmp = -0.5*norms - (self.dim/2)*np.log(2*np.pi) - 0.5*self.logdet
-            
-            if full_reduce:
-                idx = list(range(len(tmp.shape)))
+            if reduce:
+                return tf.reduce_sum(tmp)
             else:
-                idx = [-1] if len(tmp.shape) != 0 else []
-
-            if mean:
-                return tf.reduce_mean(tmp, idx)
-            else:
-                return tf.reduce_sum(tmp, idx)
+                return tmp
 
 class MVNormalRW(MVNormal):
-    def __init__(self, dim, sigma=1, sigma0=1, name='mvn_rw', lowerd=None, ldiag=None):
+    def __init__(self, dim, sigma=1, sigma0=1, name='MVNormalRW', lowerd=None, ldiag=None):
         super().__init__(dim=dim, sigma=sigma, name=name, lowerd=lowerd, ldiag=ldiag)
-        with tf.variable_scope(name, tf.AUTO_REUSE):
+        with tf.variable_scope(self.scope):
             self.init_distr = MVNormal(dim, sigma0, name='init_distr')
 
-    def logdens(self, x, mean=False, full_reduce=True):
+    def logdens(self, x, reduce=True):
         assert len(x.shape) >= 2
-        with tf.name_scope(self.name):
+        with tf.variable_scope(self.scope):
             with tf.name_scope('logdens'):
                 norms = x[:,1:] - x[:,:-1]
-                ll = super().logdens(norms, mean, full_reduce) + self.init_distr.logdens(x[:,0], mean, full_reduce)
+                if reduce:
+                    ll = super().logdens(norms, reduce=reduce) + self.init_distr.logdens(x[:,0], reduce=reduce)
+                else:
+                    init_ll = self.init_distr.logdens(x[:,0], reduce=reduce)[:, tf.newaxis]
+                    cont_ll = super().logdens(norms, reduce=reduce)
+                    ll = tf.concat([init_ll, cont_ll], axis=1)
+                    
             return ll
     
     def sample(self):
@@ -122,7 +130,7 @@ class DistLSTM:
                                                 activation=tf.nn.tanh) for i in range(num_layers)]
             self.cell = tf.nn.rnn_cell.MultiRNNCell(cells)
             self.post_cell = lambda x: self.dense(x, dim, name='d1')
-            self.init_dist = tf.get_variable('init_dist', [1,dim], initializer=tf.random_normal_initializer(stddev=0.01, mean=0.2))
+            self.init_distr = tf.get_variable('init_distr', [1,dim], initializer=tf.random_normal_initializer(stddev=0.01, mean=0.2))
             
             self.scope = scope
         
@@ -155,7 +163,7 @@ class DistLSTM:
             preds = out[:,:-1]
             target = seq[:,1:]
                         
-            init_logits = tf.tile(self.init_dist, [batch_size,1])
+            init_logits = tf.tile(self.init_distr, [batch_size,1])
             init_nll = tf.nn.softmax_cross_entropy_with_logits_v2(labels=seq[:,0], logits=init_logits)
             init_nll = init_nll[:,tf.newaxis]
             
@@ -165,7 +173,7 @@ class DistLSTM:
         
     def sample(self):
         with tf.variable_scope(self.scope, reuse=True):
-            init_sample = tf.distributions.Multinomial(total_count=1., logits=self.init_dist).sample()
+            init_sample = tf.distributions.Multinomial(total_count=1., logits=self.init_distr).sample()
             
             cell = self.cell
 
