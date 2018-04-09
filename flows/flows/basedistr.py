@@ -114,6 +114,27 @@ class MVNormalRW(MVNormal):
     def sample(self):
         raise NotImplementedError
 
+class LogNormal(Distribution):
+    def __init__(self, dim, mu=0., sigma=1., name='LogNormal'):
+        super().__init__(dim, name)
+        self.sigma = sigma
+        self.mu = mu
+
+    def logdens(self, x, reduce=True):
+        with tf.variable_scope(self.scope):
+            logits = tf.log(x)
+            s2 = tf.square(self.sigma)
+
+            denum = - 0.5 * tf.log(2*np.pi*s2)
+            tmp = -tf.square(logits-self.mu)/(2*s2) + denum - logits
+            if reduce:
+                tmp = tf.reduce_sum(tmp)
+            return tmp
+
+    def sample(self):
+        with tf.variable_scope(self.scope):
+            return tf.exp(tf.random_normal(self.dim, self.mu, self.sigma, dtype=floatX))
+
 class DistLSTM:
     def __init__(self, dim, name='DistLSTM', sample_len=None, state_dim=64, num_layers=3, reuse=None):
         self.dim = dim
