@@ -136,11 +136,12 @@ class LogNormal(Distribution):
             return tf.exp(tf.random_normal(self.dim, self.mu, self.sigma, dtype=floatX))
 
 class DistLSTM:
-    def __init__(self, dim, name='DistLSTM', sample_len=None, state_dim=64, num_layers=3, reuse=None):
+    def __init__(self, dim, name='DistLSTM', sample_len=None, state_dim=64, num_layers=3, reuse=None, aux_vars=None):
         self.dim = dim
         self.name = name
         self.reuse = reuse
         self.sample_len = sample_len
+        self.aux_vars = aux_vars
 
         if sample_len is None:
             raise ValueError
@@ -169,11 +170,21 @@ class DistLSTM:
             cell = self.cell
 
             s_t = tf.transpose(seq, [1,0,2])
+            aux_vars = self.aux_vars
+
+            if aux_vars is not None:
+                aux_vars = tf.transpose(aux_vars, [1,0,2])
+
             init_state = cell.zero_state(batch_size=batch_size, dtype=floatX)
 
             init = (tf.zeros([batch_size, cell.state_size[0][0]], dtype=floatX), init_state)
             print(init[0])
-            out,_ = tf.scan(lambda prev, x: cell(x, prev[1]), s_t, initializer=init)
+
+            if aux_vars is None:
+                out,_ = tf.scan(lambda prev, x: cell(x, prev[1]), s_t[:-1], initializer=init)
+            else:
+                out,_ = tf.scan(lambda prev, x: cell(tf.concat([x[0], x[1]], axis=-1), prev[1]), [s_t[:-1], aux_vars], initializer=init)
+                
             out = tf.transpose(out, [1,0,2])
             
             out_dim = out.shape
@@ -181,9 +192,9 @@ class DistLSTM:
             out = tf.reshape(out, [-1, out_dim[-1]])
             out = tf.cast(out, floatX)
             out = self.post_cell(out)
-            out = tf.reshape(out, [batch_size, s_len, self.dim])
+            out = tf.reshape(out, [batch_size, s_len-1, self.dim])
             
-            preds = out[:,:-1]
+            preds = out
             target = seq[:,1:]
                         
             init_logits = tf.tile(self.init_distr, [batch_size,1])
@@ -198,6 +209,10 @@ class DistLSTM:
         with tf.variable_scope(self.scope, reuse=tf.AUTO_REUSE, dtype=floatX):
             init_sample = tf.distributions.Multinomial(total_count=1., logits=tf.cast(self.init_distr, tf.float32)).sample()
             init_sample = tf.cast(init_sample, floatX)
+            aux_vars = self.aux_vars
+
+            if aux_vars is not None:
+                aux_vars = tf.transpose(aux_vars, [1,0,2])
             
             cell = self.cell
 
@@ -214,7 +229,11 @@ class DistLSTM:
                 post_step = tf.cast(post_step, floatX)
                 return post_step, cell_step[1]
             
-            out,_ = tf.scan(lambda prev, _: step(prev), tf.range(self.sample_len-1), initializer=init)
+            if aux_vars is None:
+                out,_ = tf.scan(lambda prev, _: step(prev), tf.range(self.sample_len-1), initializer=init)
+            else:
+                out,_ = tf.scan(lambda prev, x: step((tf.concat([prev[0], x], axis=-1), prev[1])), aux_vars, initializer=init)
+
             out = tf.transpose(out, [1,0,2])
             out = tf.concat([init_sample[:,tf.newaxis,:], out], axis=1)
             return tf.identity(out, name='sample')
