@@ -168,6 +168,7 @@ class DistLSTM:
     def logdens(self, seq):
         with tf.variable_scope(self.scope, reuse=tf.AUTO_REUSE, dtype=floatX):
             batch_size, s_len = tf.shape(seq)[0], tf.shape(seq)[1]
+            print(batch_size, s_len)
 
             cell = self.cell
 
@@ -205,6 +206,7 @@ class DistLSTM:
             
             nll = tf.nn.softmax_cross_entropy_with_logits_v2(labels=target, logits=preds)
             nll = tf.concat([init_nll, nll], axis=1)
+            nll.set_shape(seq.shape[:2])
             return tf.identity(-nll, name='logdens')
         
     def sample(self):
@@ -228,6 +230,7 @@ class DistLSTM:
                 cell_step = cell(x, state)
                 post_step = self.post_cell(cell_step[0])
                 post_step = tf.distributions.Multinomial(total_count=1., logits=tf.cast(post_step, tf.float32)).sample()
+                print('Post_step', post_step)
                 post_step = tf.cast(post_step, floatX)
                 return post_step, cell_step[1]
             
@@ -239,3 +242,33 @@ class DistLSTM:
             out = tf.transpose(out, [1,0,2])
             out = tf.concat([init_sample[:,tf.newaxis,:], out], axis=1)
             return tf.identity(out, name='sample')
+
+
+class GVAR(Distribution):
+    def __init__(self, dim, len, name=None):
+        super().__init__(dim=dim, name=name)
+        self.len = len
+        self.logdens = None #property to hold logdensity of the last sample
+
+    def sample(self):
+        from flows import LinearChol
+        with tf.variable_scope(self.scope, reuse=tf.AUTO_REUSE):
+
+            init = Normal([1,self.len, self.dim], sigma=0.01)
+            out_sample = init.sample() 
+
+            with tf.name_scope('VAR'):
+                flows = [LinearChol(self.dim, name='lc_0', use_bias=False)(out_sample[:,0,:])]
+                for i in range(self.len-1):
+                    aux = flows[-1][-1].output
+                    new = LinearChol(self.dim, name='lc_{}'.format(i+1), aux_vars=aux, use_bias=False)(out_sample[:,i+1,:])
+                    flows.append(new)
+                outputs = [x[-1].output for x in flows]
+                outputs = tf.concat(outputs, axis=0)
+                outputs += tf.get_variable('mu', initializer=tf.zeros([self.len,self.dim], dtype=floatX))
+                outputs = tf.cumsum(outputs)[tf.newaxis]
+                
+                with tf.name_scope('logdens'):
+                    self.logdens = -tf.reduce_sum([flow[-1].logj for flow in flows]) + init.logdens(out_sample)
+                    
+                return outputs
