@@ -165,7 +165,7 @@ class DistLSTM:
             out = tf.matmul(inp, W) + b
         return out
     
-    def logdens(self, seq):
+    def get_logdens(self, seq):
         with tf.variable_scope(self.scope, reuse=tf.AUTO_REUSE, dtype=floatX):
             batch_size, s_len = tf.shape(seq)[0], tf.shape(seq)[1]
             print(batch_size, s_len)
@@ -211,8 +211,11 @@ class DistLSTM:
         
     def sample(self):
         with tf.variable_scope(self.scope, reuse=tf.AUTO_REUSE, dtype=floatX):
-            init_sample = tf.distributions.Multinomial(total_count=1., logits=tf.cast(self.init_distr, tf.float32)).sample()
+            init_sample_d = tf.distributions.Multinomial(total_count=1., logits=tf.cast(self.init_distr, tf.float32))
+            init_sample = init_sample_d.sample()
+            init_sample_logdens = tf.reduce_sum(tf.cast(init_sample_d.log_prob(init_sample), floatX))[tf.newaxis]
             init_sample = tf.cast(init_sample, floatX)
+
             aux_vars = self.aux_vars
 
             if aux_vars is not None:
@@ -222,26 +225,34 @@ class DistLSTM:
 
             init_state = cell.zero_state(batch_size=1, dtype=floatX)
 
-            init = (init_sample, init_state)
+            init = ((init_sample, tf.constant(0., dtype=floatX)), init_state)
             
             def step(prev):
-                x = prev[0]
+                x = prev[0][0]
+                print(x)
                 state = prev[1]
                 cell_step = cell(x, state)
                 post_step = self.post_cell(cell_step[0])
-                post_step = tf.distributions.Multinomial(total_count=1., logits=tf.cast(post_step, tf.float32)).sample()
+                gen_distr = tf.distributions.Multinomial(total_count=1., logits=tf.cast(post_step, tf.float32))
+                post_step = gen_distr.sample()
+                post_step_logdens = tf.cast(tf.reduce_sum(gen_distr.log_prob(post_step)), floatX)
                 print('Post_step', post_step)
                 post_step = tf.cast(post_step, floatX)
-                return post_step, cell_step[1]
+                return (post_step, post_step_logdens), cell_step[1]
             
             if aux_vars is None:
                 out,_ = tf.scan(lambda prev, _: step(prev), tf.range(self.sample_len-1), initializer=init)
             else:
                 out,_ = tf.scan(lambda prev, x: step((tf.concat([prev[0], x], axis=-1), prev[1])), aux_vars, initializer=init)
 
-            out = tf.transpose(out, [1,0,2])
-            out = tf.concat([init_sample[:,tf.newaxis,:], out], axis=1)
-            return tf.identity(out, name='sample')
+            samples, ld = out
+            samples = tf.transpose(samples, [1,0,2])
+            samples = tf.concat([init_sample[:,tf.newaxis,:], samples], axis=1)
+
+            ld = tf.concat([init_sample_logdens, ld], axis=0)[tf.newaxis]
+            self.logdens = ld
+
+            return tf.identity(samples, name='sample')
 
 
 class GVAR(Distribution):
