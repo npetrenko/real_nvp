@@ -254,6 +254,29 @@ class DistLSTM:
 
             return tf.identity(samples, name='sample')
 
+class Gumbel:
+    def __init__(self, shape, logits, name='Gumbel'):
+        self.shape = shape
+        self.name = name
+        with tf.name_scope(self.name):
+            with tf.name_scope('normalized_logits'):
+                self.logits = logits - tf.log(tf.reduce_sum(tf.exp(logits), axis=-1))[...,tf.newaxis]
+    def sample(self, us=None, argmax=None):
+        with tf.name_scope(self.name):
+            if us is None:
+                us = tf.random_uniform(self.shape, minval=1e-3, maxval=1-1e-3)
+            self.uniform_sample = us
+            
+            if argmax is None:
+                gb = -tf.log(-tf.log(us)) + self.logits
+            else:
+                upper = -tf.log(-tf.log(us))
+                argmax_ix = tf.argmax(argmax, axis=-1)
+                upper_samples = tf.reduce_sum(us*argmax, axis=-1)
+                gb = -tf.log(-tf.log(us)/tf.exp(self.logits) - tf.log(upper_samples)[...,tf.newaxis])
+                gb = upper*argmax + gb*(1-argmax)
+            return gb
+
 
 class GVAR(Distribution):
     def __init__(self, dim, len, name=None):

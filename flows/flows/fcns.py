@@ -2,7 +2,7 @@ import tensorflow as tf
 import numpy as np
 from .config import floatX
 
-def Dense(inp, num_n, name='Dense', use_bias=True):
+def Dense(inp, num_n, name='Dense', use_bias=True, activation=None):
     with tf.variable_scope(name, initializer=tf.random_normal_initializer(stddev=0.01, dtype=floatX)):
         inp_dim = int(inp.shape[-1])
         W = tf.get_variable('W', [inp_dim, num_n], dtype=floatX)
@@ -11,6 +11,8 @@ def Dense(inp, num_n, name='Dense', use_bias=True):
         if use_bias:
             b = tf.get_variable('b', [1, num_n], dtype=floatX)
             pa += b
+        if activation is not None:
+            pa = activation(pa)
             
     return pa
 
