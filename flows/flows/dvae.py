@@ -55,18 +55,17 @@ class RMultinomial:
 
     def build_nvil(self, input_vars):
         d = input_vars
-        with tf.variable_scope(self.scope):
-            with tf.variable_scope(self.nvil_scope):
-                conf = [128, 64, 1]
-                with tf.variable_scope('FCN'):
-                    for i, num_neurons in enumerate(conf):
-                        if i != len(conf)-1:
-                            activation = tf.nn.tanh
-                        else:
-                            activation = None
-                        d = Dense(d, num_neurons, name='d{}'.format(i), activation=activation)
-                    nvil = d[:,0]
-                return nvil
+        with tf.variable_scope(self.nvil_scope):
+            conf = [128, 64, 1]
+            with tf.variable_scope('FCN'):
+                for i, num_neurons in enumerate(conf):
+                    if i != len(conf)-1:
+                        activation = tf.nn.tanh
+                    else:
+                        activation = None
+                    d = Dense(d, num_neurons, name='d{}'.format(i), activation=activation)
+                nvil = d[:,0]
+            return nvil
 
     def get_control_vars(self):
         control_vars = self.graph.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=self.control_scope.name)
@@ -83,8 +82,8 @@ class RMultinomial:
 
             denum = [tf.reduce_prod(tf.shape(g)) for g in gradients]
             denum = tf.reduce_sum(denum)
-            denum = tf.minimum(tf.cast(denum, tf.float32), 40.)
-            return gs*1000#/denum
+            denum = tf.minimum(tf.cast(denum, floatX), 40.)
+            return gs*1000.#/denum
 
     def encode(self, x):
         with tf.variable_scope(self.scope):
@@ -126,7 +125,7 @@ class DVAE:
         self.config = config
         self.activation = tf.nn.tanh
         self.graph = tf.get_default_graph()
-        with tf.variable_scope(self.name) as scope:
+        with tf.variable_scope(self.name, dtype=floatX) as scope:
             self.create_controls()
             self.scope = scope
 
@@ -194,19 +193,19 @@ class DVAE:
 
             denum = [tf.reduce_prod(tf.shape(g)) for g in gradients]
             denum = tf.reduce_sum(denum)
-            denum = tf.cast(denum, tf.float32)
+            denum = tf.cast(denum, floatX)
             return gs/denum
 
     def priorkl(self, encoded, encoded_logits):
         with tf.name_scope('priorkl'):
-            labels = tf.ones_like(encoded)/tf.cast(2, tf.float32)
+            labels = tf.ones_like(encoded)/tf.cast(encoded.shape[-1], floatX)
             xent = tf.reduce_sum(encoded*tf.log(labels), axis=[-1,-2], name='xent')
             nent = tf.reduce_sum(encoded*tf.log(encoded), axis=[-1,-2], name='nent')
             with tf.control_dependencies([tf.check_numerics(x, message='priorkl_numerics_{}'.format(x.name)) for x in [xent, nent]]):
                 loss = -xent + nent
         return loss
 
-    def encode(self, x, hard=False, uniform_sample=None, condition=None):
+    def encode(self, x):
         with tf.variable_scope('encoder', reuse=tf.AUTO_REUSE) as scope:
             self.encoder_scope = scope
             for i, out_dim in enumerate(self.config):
@@ -220,16 +219,16 @@ class DVAE:
                 self.center_loss = 1e-2*tf.reduce_mean(tf.square(tf.log(tf.reduce_sum(tf.exp(logits), axis=-1))))
 
                 gd = Gumbel(tf.shape(logits), logits=logits)
-                encoded_gumb = gd.sample(us=uniform_sample, argmax=condition)
-                self.uniform_sample = gd.uniform_sample
 
-                encoded = tf.nn.softmax(encoded_gumb/self.temp)
                 self.kl_loss = self.priorkl(tf.nn.softmax(self.logits), self.logits)
-                encoded_soft = encoded
 
                 encoded_hard = tf.distributions.Multinomial(1., logits=self.logits).sample()
+                encoded_gumb_uncond = gd.sample(argmax=None)
+                encoded_soft_uncond = tf.nn.softmax(encoded_gumb_uncond/self.temp)
 
-                return encoded_soft, encoded_hard
+                encoded_gumb_cond = gd.sample(argmax=encoded_hard)
+                encoded_soft_cond = tf.nn.softmax(encoded_gumb_cond/self.temp)
+                return encoded_soft_uncond, encoded_soft_cond, encoded_hard
 
     def decode(self, x):
         with tf.variable_scope('decoder', reuse=tf.AUTO_REUSE) as scope:
