@@ -222,13 +222,18 @@ class DVAE:
 
                 self.kl_loss = self.priorkl(tf.nn.softmax(self.logits), self.logits)
 
-                encoded_hard = tf.distributions.Multinomial(1., logits=self.logits).sample()
                 encoded_gumb_uncond = gd.sample(argmax=None)
                 encoded_soft_uncond = tf.nn.softmax(encoded_gumb_uncond/self.temp)
 
-                encoded_gumb_cond = gd.sample(argmax=encoded_hard)
+                encoding_dist = tf.distributions.Multinomial(1., logits=tf.cast(self.logits, tf.float32))
+
+                encoded_hard = tf.cast(encoding_dist.sample(), floatX)
+                encoded_hard_logp = tf.cast(encoding_dist.log_prob(tf.cast(encoded_hard, tf.float32)), floatX)
+
+                encoded_gumb_cond = gd.sample(us=None, argmax=encoded_hard)
                 encoded_soft_cond = tf.nn.softmax(encoded_gumb_cond/self.temp)
-                return encoded_soft_uncond, encoded_soft_cond, encoded_hard
+
+                return encoded_soft_uncond, encoded_soft_cond, (encoded_hard, encoded_hard_logp)
 
     def decode(self, x):
         with tf.variable_scope('decoder', reuse=tf.AUTO_REUSE) as scope:
