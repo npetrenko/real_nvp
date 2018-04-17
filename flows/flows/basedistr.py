@@ -264,7 +264,7 @@ class Gumbel:
     def sample(self, us=None, argmax=None):
         with tf.name_scope(self.name):
             if us is None:
-                us = tf.random_uniform(self.shape, minval=1e-3, maxval=1-1e-3)
+                us = tf.cast(tf.random_uniform(self.shape, minval=1e-3, maxval=1-1e-3), floatX)
             self.uniform_sample = us
             
             if argmax is None:

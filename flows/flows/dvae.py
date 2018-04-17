@@ -106,11 +106,11 @@ class RMultinomial:
 
                     encoded_soft_uncond = tf.nn.softmax(encoded_gumb_uncond/self.temp)
 
-                    encoding_dist = tf.distributions.Multinomial(1., logits=self.logits)
+                    encoding_dist = tf.distributions.Multinomial(1., logits=tf.cast(self.logits, tf.float32))
                     encoding_entropy = None# tf.reduce_sum(encoding_dist.entropy())
 
-                    encoded_hard = encoding_dist.sample()
-                    encoded_hard_logp = encoding_dist.log_prob(encoded_hard)
+                    encoded_hard = tf.cast(encoding_dist.sample(), floatX)
+                    encoded_hard_logp = tf.cast(encoding_dist.log_prob(tf.cast(encoded_hard, tf.float32)), floatX)
 
                     encoded_gumb_cond = gd.sample(us=None, argmax=encoded_hard)
                     encoded_soft_cond = tf.nn.softmax(encoded_gumb_cond/self.temp)
