@@ -108,6 +108,7 @@ class RMultinomial:
                     encoded_soft_uncond = tf.nn.softmax(encoded_gumb_uncond/self.temp)
 
                     encoding_dist = tf.distributions.Multinomial(1., logits=self.logits)
+                    encoding_entropy = None# tf.reduce_sum(encoding_dist.entropy())
 
                     encoded_hard = encoding_dist.sample()
                     encoded_hard_logp = encoding_dist.log_prob(encoded_hard)
@@ -115,7 +116,7 @@ class RMultinomial:
                     encoded_gumb_cond = gd.sample(us=None, argmax=encoded_hard)
                     encoded_soft_cond = tf.nn.softmax(encoded_gumb_cond/self.temp)
 
-                    return encoded_soft_uncond, encoded_soft_cond, (encoded_hard, encoded_hard_logp)
+                    return encoded_soft_uncond, encoded_soft_cond, (encoded_hard, encoded_hard_logp, encoding_entropy)
 
 class DVAE:
     def __init__(self, dim, hshape, name='VAE', config=[128,64,32]):
