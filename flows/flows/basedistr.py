@@ -48,10 +48,21 @@ class NormalRW(Normal):
             assert len(x.shape) >= 2
             norms = x[:,1:] - x[:,:-1]
             if reduce==True:
-                ll = super().logdens(norms, reduce) + self.init_distr.logdens(x[:,0], reduce)
+                if self.init_distr.mu is None:
+                    init_logdens = 0.
+                else:
+                    init_logdens = self.init_distr.logdens(x[:,0], reduce)
+                    if self.init_distr.sigma is not None:
+                        raise ValueError
+                ll = super().logdens(norms, reduce) + init_logdens
                 return ll
             else:
-                init_dens = tf.reduce_sum(self.init_distr.logdens(x[:,0], reduce)[:,tf.newaxis], axis=-1)
+                if self.init_distr.mu is not None:
+                    init_dens = tf.reduce_sum(self.init_distr.logdens(x[:,0], reduce)[:,tf.newaxis], axis=-1)
+                else:
+                    init_dens = tf.constant([[0.]], dtype=floatX)
+                    if self.init_distr.sigma is None:
+                        raise ValueError
                 cont_dens = tf.reduce_sum(super().logdens(norms, reduce), axis=-1)
                 dens = tf.concat([init_dens, cont_dens], axis=1)
                 return dens
@@ -67,7 +78,7 @@ class MVNormal(Distribution):
             if lowerd is None:
                 lowerd = tf.get_variable('lowerd', initializer=tf.random_normal(shape=[self.dim + self.dim*(self.dim - 1)//2], dtype=floatX, stddev=0.05))
             else:
-                print('Warning! Triengular part of lowerd is dropped and will cause problems with entropy calculations')
+                print('Warning! Diagonal part of lowerd is dropped and will cause problems with entropy calculations')
 
             if ldiag is None:
                 ldiag = tf.get_variable('ldiag', initializer=np.array([-np.log(sigma)]*self.dim, dtype=floatX))
@@ -82,6 +93,7 @@ class MVNormal(Distribution):
             self.logdet = -2*tf.reduce_sum(ldiag) 
             self.inverse_sigma = isigma
             self.fsigma = fsigma
+            #self.sigma = tf.linalg.inv(fsigma)
 
     def logdens(self, x, reduce=True):
         with tf.variable_scope(self.scope):
@@ -279,10 +291,11 @@ class Gumbel:
 
 
 class GVAR(Distribution):
-    def __init__(self, dim, len, name=None):
+    def __init__(self, dim, len, name=None, mu=None):
         super().__init__(dim=dim, name=name)
         self.len = len
         self.logdens = None #property to hold logdensity of the last sample
+        self.mu = mu
 
     def sample(self):
         from flows import LinearChol
@@ -299,8 +312,17 @@ class GVAR(Distribution):
                     flows.append(new)
                 outputs = [x[-1].output for x in flows]
                 outputs = tf.concat(outputs, axis=0)
-                outputs += tf.get_variable('mu', initializer=tf.zeros([self.len,self.dim], dtype=floatX))
-                outputs = tf.cumsum(outputs)[tf.newaxis]
+
+                addmu = tf.get_variable('mu', initializer=tf.zeros([self.len,self.dim], dtype=floatX))
+                addmu = tf.cumsum(addmu)
+                outputs = tf.cumsum(outputs) #какая-то сомнительная строчка
+
+                if self.mu is not None:
+                    addmu -= tf.reduce_mean(addmu, axis=0)[tf.newaxis]
+                    addmu += self.mu
+
+                outputs += addmu
+                outputs = outputs[tf.newaxis]
                 
                 with tf.name_scope('logdens'):
                     self.logdens = -tf.reduce_sum([flow[-1].logj for flow in flows]) + init.logdens(out_sample)
