@@ -171,7 +171,7 @@ class LinearChol(Flow):
             diag = tf.diag(tf.exp(ldiag))
             fsigma = fill_triangular(lowerd)*(1-diag_mask) + diag
 
-            self.logj = tf.reduce_sum(ldiag)
+            self.logj = tf.reduce_sum(ldiag)[tf.newaxis]
 
             output = tf.matmul(prev_flow_output, fsigma)
             if self.use_bias:

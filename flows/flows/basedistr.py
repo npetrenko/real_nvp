@@ -2,6 +2,7 @@ import tensorflow as tf
 import numpy as np
 from .config import floatX
 from tensorflow.python.ops.distributions.util import fill_triangular
+import math
 
 class Distribution:
     def __init__(self, dim=None, name=None):
@@ -39,9 +40,8 @@ class NormalRW(Normal):
         super().__init__(dim, mu, sigma)
         Distribution.__init__(self, dim=dim, name=name)
 
-        print(self.scope)
         with tf.variable_scope(self.scope):
-            self.init_distr = Normal(None, mu0, sigma0)
+            self.init_distr = Normal(None, mu=mu0, sigma=sigma0)
 
     def logdens(self, x, reduce=True):
         with tf.variable_scope(self.scope):
@@ -50,18 +50,21 @@ class NormalRW(Normal):
             if reduce==True:
                 if self.init_distr.mu is None:
                     init_logdens = 0.
+                    if self.init_distr.sigma is not None:
+                        raise ValueError
                 else:
                     init_logdens = self.init_distr.logdens(x[:,0], reduce)
-                    if self.init_distr.sigma is not None:
+                    if self.init_distr.sigma is None:
                         raise ValueError
                 ll = super().logdens(norms, reduce) + init_logdens
                 return ll
             else:
                 if self.init_distr.mu is not None:
+                    print('Init_distr.mu is not None')
                     init_dens = tf.reduce_sum(self.init_distr.logdens(x[:,0], reduce)[:,tf.newaxis], axis=-1)
                 else:
                     init_dens = tf.constant([[0.]], dtype=floatX)
-                    if self.init_distr.sigma is None:
+                    if self.init_distr.sigma is not None:
                         raise ValueError
                 cont_dens = tf.reduce_sum(super().logdens(norms, reduce), axis=-1)
                 dens = tf.concat([init_dens, cont_dens], axis=1)
@@ -73,7 +76,6 @@ class NormalRW(Normal):
 class MVNormal(Distribution):
     def __init__(self, dim, sigma=1., name='MVNormal', lowerd=None, ldiag=None):
         super().__init__(dim=dim, name=name)
-        print(self.scope.name)
         with tf.variable_scope(self.scope):
             if lowerd is None:
                 lowerd = tf.get_variable('lowerd', initializer=tf.random_normal(shape=[self.dim + self.dim*(self.dim - 1)//2], dtype=floatX, stddev=0.05))
@@ -93,13 +95,13 @@ class MVNormal(Distribution):
             self.logdet = -2*tf.reduce_sum(ldiag) 
             self.inverse_sigma = isigma
             self.fsigma = fsigma
-            #self.sigma = tf.linalg.inv(fsigma)
+            self.sigma = tf.linalg.inv(isigma)
 
     def logdens(self, x, reduce=True):
         with tf.variable_scope(self.scope):
             #reduction happens only on the last dimension:
             norms = tf.reduce_sum(tf.square(tf.tensordot(x, self.fsigma, [[-1], [0]])), axis=-1)
-            tmp = -0.5*norms - (self.dim/2)*np.log(2*np.pi) - 0.5*self.logdet
+            tmp = -0.5*norms - (self.dim/2)*np.log(2*np.pi) - 0.5*(self.logdet + tf.cast(tf.shape(x)[-1], floatX)*tf.log(tf.cast(2*math.pi, floatX)))
             if reduce:
                 return tf.reduce_sum(tmp)
             else:
@@ -320,6 +322,7 @@ class GVAR(Distribution):
                 if self.mu is not None:
                     addmu -= tf.reduce_mean(addmu, axis=0)[tf.newaxis]
                     addmu += self.mu
+                    print(addmu)
 
                 outputs += addmu
                 outputs = outputs[tf.newaxis]

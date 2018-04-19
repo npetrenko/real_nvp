@@ -4,3 +4,4 @@ flows/dist
 .ipynb_checkpoints
 flows/build
 __pycache__
+MNIST-data
