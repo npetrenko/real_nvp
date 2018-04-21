@@ -16,12 +16,12 @@ tf.set_random_seed(1234)
 ccodes = ['AUS', 'FRA', 'GBR']
 datas = ['../CDATA/{}.csv'.format(x) for x in ccodes]
 
-datas = [pd.read_csv(x, index_col='Unnamed: 0').iloc[:,:-1] for x in datas]
+datas = [pd.read_csv(x, index_col='VARIABLE').iloc[:,:-1] for x in datas]
 
 max_year = 0
 for i, data in enumerate(datas):
-    data.columns = data.columns.astype('int')
     data = data.astype(floatX)
+    data.columns = data.columns.astype('float32')
     
     new_data = np.concatenate([data.values.T[1:], data.values.T[:-1]], axis=1)
     new_data_columns = data.columns[1:]
@@ -31,18 +31,20 @@ for i, data in enumerate(datas):
     print(data.columns)
     max_year = max(max(data.columns), max_year)
 
-YEARS = range(2000, max_year)
+VAR_DIM = 4
+
+YEARS = [x for x in data.columns if x > 2000]
 
 country_data = {c:d for c,d in zip(ccodes, datas)}
 
 
 #BUILDING the model
 
-current_year = tf.placeholder(tf.int32, shape=(), name='current_year')
+current_year = tf.placeholder(tf.float32, shape=(), name='current_year')
 tf.summary.scalar('current_year', current_year)
 
 
-global_inf = DFlow([NVPFlow(dim=(3*2+1)*3, name='flow_{}'.format(i)) for i in range(6)], init_sigma=0.08)
+global_inf = DFlow([NVPFlow(dim=(VAR_DIM*2+1)*VAR_DIM, name='flow_{}'.format(i)) for i in range(6)], init_sigma=0.08)
 global_prior = Normal(None, sigma=.3).logdens(global_inf.output)
 tf.add_to_collection('priors', global_prior)
 tf.add_to_collection('logdensities', global_inf.logdens)
@@ -58,7 +60,7 @@ with tf.variable_scope('variation_rate', dtype=floatX):
     
     tf.summary.scalar('variation', variation)
 
-individ_variation_prior = Normal((3*2+1)*3, sigma=variation, mu=global_inf.output[0])
+individ_variation_prior = Normal((VAR_DIM*2+1)*VAR_DIM, sigma=variation, mu=global_inf.output[0])
 
 models = []
 indiv_logdens = []
@@ -68,7 +70,7 @@ indivs = {}
 with tf.variable_scope(tf.get_variable_scope(), dtype=floatX, reuse=tf.AUTO_REUSE):
     for country, data in country_data.items():
         with tf.variable_scope(country):
-            individ_variation = DFlow([NVPFlow((3*2+1)*3, 
+            individ_variation = DFlow([NVPFlow((VAR_DIM*2+1)*VAR_DIM, 
                                                name='nvp_{}'.format(i), 
                                                aux_vars=global_inf.output) for i in range(6)], init_sigma=0.08)
 
@@ -78,7 +80,7 @@ with tf.variable_scope(tf.get_variable_scope(), dtype=floatX, reuse=tf.AUTO_REUS
             indiv_logdens.append(individ_variation.logdens)
             indiv_priors.append(individ_variation_prior.logdens(ind))
 
-        model = VARmodel(data, name='{}_model'.format(country), mu=ind[tf.newaxis], current_year=current_year)
+        model = VARmodel(data, name='{}_model'.format(country), var_dim=VAR_DIM, mu=ind[tf.newaxis], current_year=current_year)
         models.append(model)
 
 indiv_logdens
@@ -104,7 +106,7 @@ init = tf.global_variables_initializer()
 
 init.run()
 
-writer = tf.summary.FileWriter('/home/nikita/tmp/hier/4main_rolling_long_rr1_restr')
+writer = tf.summary.FileWriter('/home/ubuntu/tblogs')
 
 def validate_year(year):
     cdic = {model.name:model for model in models}
@@ -124,9 +126,9 @@ def validate_year(year):
 
     for model in models:
         try:
-            a = model.data_raw.loc[:,year].values[:3]
+            a = model.data_raw.loc[:,year].values[:VAR_DIM]
         except KeyError:
-            a = np.zeros(3, dtype=floatX)*np.nan
+            a = np.zeros(VAR_DIM, dtype=floatX)*np.nan
         mean_pred[model.name]['CYEAR={}'.format(year)] = a
     return mean_pred
 
@@ -140,7 +142,7 @@ for epoch in tqdm(range(1500)):
 validations = []
 for year in tqdm(YEARS):
     fd = {current_year: year}
-    for epoch in range(epoch, epoch+150):
+    for epoch in range(epoch, epoch+200//4):
         for step in range(100):
             sess.run(main_op, fd)
         s, _ = sess.run([summary, main_op], fd)

@@ -6,10 +6,11 @@ from .flows import *
 from tensorflow.contrib.distributions import WishartCholesky
 
 class VARmodel:
-    def __init__(self, data, name='VARmodel', mu=None, current_year=None):
+    def __init__(self, data, name='VARmodel', var_dim=None, mu=None, current_year=None):
         self.data_raw = data
-        self.years = data.columns.values.astype('int32')
-        years_c = tf.constant(data.columns.values, dtype=tf.int32, name='data_years')
+        self.var_dim = var_dim
+        self.years = data.columns.values.astype('float32')
+        years_c = tf.constant(data.columns.values, dtype=tf.float32, name='data_years')
 
         if current_year is None:
             self.OBSERV_STEPS = np.Infinity
@@ -20,7 +21,7 @@ class VARmodel:
         self.name = name
         self.logdensities = []
         self.priors = []
-        self.dim = [3,3*2+1]
+        self.dim = [self.var_dim,self.var_dim*2+1]
         self.summaries = []
 
         self.observable_mask = tf.range(0, self.NUM_STEPS, dtype=tf.int32) < self.OBSERV_STEPS
@@ -84,16 +85,16 @@ class VARmodel:
     def create_observ_dispersion_inference(self, prior_disp):
         with tf.variable_scope('obs_d_inf', reuse=tf.AUTO_REUSE):
 #             ldiag = DFlow([NVPFlow(dim=3, name='ldiag_flow_' + str(i)) for i in range(2)], init_sigma=0.05)
-            ldiag = DFlow([LinearChol(dim=3, name='ldiag_flow_' + str(i)) for i in range(1)], init_sigma=0.05)
+            ldiag = DFlow([LinearChol(dim=self.var_dim, name='ldiag_flow_' + str(i)) for i in range(1)], init_sigma=0.05)
 
             ldiag.output -= 0.5*math.log(prior_disp)
             ldiag.logdens -= tf.reduce_sum(ldiag.output, axis=-1)
 
-        self.obs_d = MVNormal(3, sigma=None, name='obs_d_prior',
+        self.obs_d = MVNormal(self.var_dim, sigma=None, name='obs_d_prior',
                    ldiag=ldiag.output[0])
 
-        df = 3
-        pmat = np.diag([(2./prior_disp)]*3)/df
+        df = self.var_dim
+        pmat = np.diag([(2./prior_disp)]*self.var_dim)/df
         cov_prior = WishartCholesky(df, pmat, cholesky_input_output_matrices=True)
 
         pr = cov_prior.log_prob(self.obs_d.fsigma)
@@ -102,7 +103,7 @@ class VARmodel:
 
         sigmas = tf.sqrt(tf.diag_part(self.obs_d.sigma))
 
-        std = tf.nn.moments(self.data[0,1:,:3] - self.data[0,:-1,:3], axes=[0])[1]
+        std = tf.nn.moments(self.data[0,1:,:self.var_dim] - self.data[0,:-1,:self.var_dim], axes=[0])[1]
         print(std, sigmas)
         rsquareds = 1 - sigmas/std
         self.create_summary(tf.summary.scalar, 'rsquared_post_mean', tf.reduce_mean(rsquareds))
@@ -140,12 +141,12 @@ class VARmodel:
         obs_d = self.obs_d
 
         preds = self.predict(observable_mask, outputs)
-        self.preds = preds[:,:3]
+        self.preds = preds[:,:self.var_dim]
 
         diffs = preds[:-1] - self.data[0,1:]
         diffs = diffs[:,:dim[0]]
 
-        std = tf.nn.moments(self.data[0,1:,:3] - self.data[0,:-1,:3], axes=[0])[1]
+        std = tf.nn.moments(self.data[0,1:,:self.var_dim] - self.data[0,:-1,:self.var_dim], axes=[0])[1]
         od = tf.cast(self.observable_mask[1:], floatX)[:,tf.newaxis] * diffs
         rsq_obs = tf.reduce_mean(tf.square(od), axis=0)/std
         rsq_obs = 1-tf.reduce_mean(rsq_obs)
