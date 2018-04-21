@@ -43,14 +43,14 @@ tf.summary.scalar('current_year', current_year)
 
 
 global_inf = DFlow([NVPFlow(dim=(3*2+1)*3, name='flow_{}'.format(i)) for i in range(6)], init_sigma=0.08)
-global_prior = Normal(None, sigma=30.).logdens(global_inf.output)
+global_prior = Normal(None, sigma=.3).logdens(global_inf.output)
 tf.add_to_collection('priors', global_prior)
 tf.add_to_collection('logdensities', global_inf.logdens)
 
 
 
 with tf.variable_scope('variation_rate', dtype=floatX):
-    variation_prerate = tf.get_variable('prerate',trainable=False, initializer=math.log(0.7))
+    variation_prerate = tf.get_variable('prerate',trainable=False, initializer=math.log(0.3))
     variation_rate = tf.exp(variation_prerate)
     variation = variation_rate#variation_d.sample()
 
@@ -104,14 +104,14 @@ init = tf.global_variables_initializer()
 
 init.run()
 
-writer = tf.summary.FileWriter('/home/nikita/tmp/hier/4main_rolling_long_rr1')
+writer = tf.summary.FileWriter('/home/nikita/tmp/hier/4main_rolling_long_rr1_restr')
 
 def validate_year(year):
     cdic = {model.name:model for model in models}
     preds = {model.name:[] for model in models}
     preds_t = {model.name: model.preds for model in models}
 
-    for step in range(1000):
+    for step in range(1500):
         preds_i = sess.run(preds_t, {current_year:year})
         for k in preds.keys():
             preds[k].append(preds_i[k][cdic[k].years > year])
@@ -130,7 +130,7 @@ def validate_year(year):
         mean_pred[model.name]['CYEAR={}'.format(year)] = a
     return mean_pred
 
-for epoch in tqdm(range(1000)):
+for epoch in tqdm(range(1500)):
     fd = {current_year:YEARS[0]}
     for step in range(100):
         sess.run(main_op, fd)
@@ -140,7 +140,7 @@ for epoch in tqdm(range(1000)):
 validations = []
 for year in tqdm(YEARS):
     fd = {current_year: year}
-    for epoch in range(epoch, epoch+100):
+    for epoch in range(epoch, epoch+150):
         for step in range(100):
             sess.run(main_op, fd)
         s, _ = sess.run([summary, main_op], fd)

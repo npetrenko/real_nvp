@@ -5,3 +5,4 @@ flows/dist
 flows/build
 __pycache__
 MNIST-data
+*.pkl
