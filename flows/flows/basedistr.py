@@ -312,26 +312,37 @@ class GVAR(Distribution):
             init = Normal([self.len, self.dim], sigma=0.01)
             out_sample = init.sample() 
 
-            with tf.variable_scope('VAR', dtype=floatX):
-                precholeskis = tf.get_variable('precholeskis', initializer=tf.constant_initializer(.001), shape=[self.len,self.dim,self.dim])
+            with tf.variable_scope('VAR', dtype=floatX, initializer=tf.random_normal_initializer(stddev=0.001)):
+                precholeskis = tf.get_variable('precholeskis', shape=[self.len,self.dim,self.dim])
+                precholeskis_diag = tf.get_variable('precholeskis_diag', shape=[self.len,self.dim])
+
                 aux_vars = tf.get_variable('aux_vars', initializer=tf.constant_initializer(0.), shape=[self.len, self.dim, self.dim])
-                lower_diag = tf.matrix_band_part(precholeskis, -1,0)
 
-                diag_mask = tf.tile(tf.diag(tf.ones(self.dim, dtype=floatX))[tf.newaxis], [self.len, 1,1])
+                choleskis = precholeskis - tf.matrix_band_part(precholeskis, 0, -1)
 
-                masked_diag = lower_diag*diag_mask
-                choleskis = lower_diag*(1-diag_mask) + tf.exp(masked_diag)
+                scan = True
+                if scan:
+                    def step(prev, x):
+                        nv = x[0][tf.newaxis]
+                        prev = prev[tf.newaxis]
+                        chol = x[1]
+                        aux_v = x[2]
+                        return (tf.matmul(nv, chol) + tf.matmul(prev, aux_v))[0]
+                        
+                    outputs = tf.scan(step, elems=[out_sample, choleskis, aux_vars], initializer=tf.zeros(self.dim, dtype=floatX))
+                else:
+                    outputs = []
+                    prev = tf.zeros(self.dim, dtype=floatX)
+                    for i in range(self.len):
+                        nv = out_sample[i][tf.newaxis]
+                        chol = choleskis[i]
+                        aux_v = aux_vars[i]
+                        prev = prev[tf.newaxis]
+                        prev = (tf.matmul(nv, chol) + tf.matmul(prev, aux_v))[0]
+                        outputs.append(prev)
+                    outputs = tf.stack(outputs)
 
-                def step(prev, x):
-                    nv = x[0][tf.newaxis]
-                    prev = prev[tf.newaxis]
-                    chol = x[1]
-                    aux_v = x[2]
-                    #print(nv, prev, chol, aux_v)
-                    return (tf.matmul(nv, chol) + tf.matmul(prev, aux_v))[0]
-                    
-                outputs = tf.scan(step, elems=[out_sample, choleskis, aux_vars], initializer=tf.zeros(self.dim, dtype=floatX))
-                print(outputs)
+                outputs += tf.exp(precholeskis_diag)*out_sample
 
                 addmu = tf.get_variable('mu', initializer=tf.zeros([self.len,self.dim], dtype=floatX))
                 addmu = tf.cumsum(addmu)
@@ -345,6 +356,6 @@ class GVAR(Distribution):
                 outputs = outputs[tf.newaxis]
                 
                 with tf.name_scope('logdens'):
-                    self.logdens = -tf.reduce_sum(masked_diag) + init.logdens(out_sample)
+                    self.logdens = -tf.reduce_sum(precholeskis_diag) + init.logdens(out_sample)
                     
                 return outputs

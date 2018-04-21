@@ -106,7 +106,7 @@ init = tf.global_variables_initializer()
 
 init.run()
 
-writer = tf.summary.FileWriter('/home/ubuntu/tblogs')
+writer = tf.summary.FileWriter('/home/ubuntu/tblogs_custom_gvar')
 
 def validate_year(year):
     cdic = {model.name:model for model in models}
