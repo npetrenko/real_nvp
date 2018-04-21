@@ -18,6 +18,12 @@ datas = ['../CDATA/{}.csv'.format(x) for x in ccodes]
 
 datas = [pd.read_csv(x, index_col='VARIABLE').iloc[:,:-1] for x in datas]
 
+mean_std = 0.
+for data in datas:
+    std = np.mean(np.std(data.values, axis=1))
+    mean_std += std
+mean_std /= len(datas)
+
 max_year = 0
 for i, data in enumerate(datas):
     data = data.astype(floatX)
@@ -25,10 +31,9 @@ for i, data in enumerate(datas):
     
     new_data = np.concatenate([data.values.T[1:], data.values.T[:-1]], axis=1)
     new_data_columns = data.columns[1:]
-    new_data = pd.DataFrame(new_data.T*100., columns=new_data_columns)
+    new_data = pd.DataFrame(new_data.T/mean_std, columns=new_data_columns)
     data = new_data
     datas[i] = data
-    print(data.columns)
     max_year = max(max(data.columns), max_year)
 
 VAR_DIM = 4
@@ -92,7 +97,7 @@ prior = tf.reduce_sum([model.priors for model in models])+ tf.reduce_sum(indiv_p
 logdensity = tf.reduce_sum([model.logdensities for model in models])+ tf.reduce_sum(indiv_logdens) + tf.reduce_sum(graph.get_collection('logdensities'))
 
 kl = logdensity - prior
-kl /= 36*21
+kl /= 36*200*4
 
 
 kls = tf.summary.scalar('KLd', kl)
