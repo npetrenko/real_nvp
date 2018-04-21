@@ -20,9 +20,11 @@ datas = [pd.read_csv(x, index_col='VARIABLE').iloc[:,:-1] for x in datas]
 
 mean_std = 0.
 for data in datas:
-    std = np.mean(np.std(data.values, axis=1))
-    mean_std += std
+    std = np.std(data.values[:,1:] - data.values[:,:-1], axis=1)
+    mean_std = std + mean_std
 mean_std /= len(datas)
+mean_std = np.concatenate([mean_std]*2, axis=0)
+print('Mean std: {}'.format(mean_std))
 
 max_year = 0
 for i, data in enumerate(datas):
@@ -31,7 +33,7 @@ for i, data in enumerate(datas):
     
     new_data = np.concatenate([data.values.T[1:], data.values.T[:-1]], axis=1)
     new_data_columns = data.columns[1:]
-    new_data = pd.DataFrame(new_data.T/mean_std, columns=new_data_columns)
+    new_data = pd.DataFrame(new_data.T/mean_std[:,np.newaxis], columns=new_data_columns)
     data = new_data
     datas[i] = data
     max_year = max(max(data.columns), max_year)
@@ -77,7 +79,7 @@ with tf.variable_scope(tf.get_variable_scope(), dtype=floatX, reuse=tf.AUTO_REUS
         with tf.variable_scope(country):
             individ_variation = DFlow([NVPFlow((VAR_DIM*2+1)*VAR_DIM, 
                                                name='nvp_{}'.format(i), 
-                                               aux_vars=global_inf.output) for i in range(6)], init_sigma=0.08)
+                                               aux_vars=global_inf.output) for i in range(6)], init_sigma=0.01)
 
             ind = individ_variation.output[0]
             indivs[country] = ind
@@ -111,7 +113,7 @@ init = tf.global_variables_initializer()
 
 init.run()
 
-writer = tf.summary.FileWriter('/home/ubuntu/tblogs_custom_gvar')
+writer = tf.summary.FileWriter('/home/ubuntu/tblogs/custom_gvar_4')
 
 def validate_year(year):
     cdic = {model.name:model for model in models}
@@ -147,7 +149,7 @@ for epoch in tqdm(range(1500)):
 validations = []
 for year in tqdm(YEARS):
     fd = {current_year: year}
-    for epoch in range(epoch, epoch+200//4):
+    for epoch in range(epoch, epoch+300//4):
         for step in range(100):
             sess.run(main_op, fd)
         s, _ = sess.run([summary, main_op], fd)

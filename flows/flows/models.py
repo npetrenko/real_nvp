@@ -86,7 +86,7 @@ class VARmodel:
         print('Prior disp: {}'.format(prior_disp))
         with tf.variable_scope('obs_d_inf', reuse=tf.AUTO_REUSE):
 #             ldiag = DFlow([NVPFlow(dim=3, name='ldiag_flow_' + str(i)) for i in range(2)], init_sigma=0.05)
-            ldiag = DFlow([LinearChol(dim=self.var_dim, name='ldiag_flow_' + str(i)) for i in range(1)], init_sigma=0.001)
+            ldiag = DFlow([LinearChol(dim=self.var_dim, name='ldiag_flow_' + str(i)) for i in range(1)], init_sigma=0.05)
 
             ldiag.output -= 0.5*math.log(prior_disp)
             ldiag.logdens -= tf.reduce_sum(ldiag.output, axis=-1)
@@ -102,7 +102,7 @@ class VARmodel:
         self.logdensities.append(ldiag.logdens[0])
         self.priors.append(pr)
 
-        sigmas = tf.sqrt(tf.diag_part(self.obs_d.sigma))
+        sigmas = tf.diag_part(self.obs_d.sigma)
 
         std = tf.nn.moments(self.data[0,1:,:self.var_dim] - self.data[0,:-1,:self.var_dim], axes=[0])[1]
         print(std, sigmas)
