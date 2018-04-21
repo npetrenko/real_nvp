@@ -309,31 +309,42 @@ class GVAR(Distribution):
         from flows import LinearChol
         with tf.variable_scope(self.scope, reuse=tf.AUTO_REUSE):
 
-            init = Normal([1,self.len, self.dim], sigma=0.01)
+            init = Normal([self.len, self.dim], sigma=0.01)
             out_sample = init.sample() 
 
-            with tf.name_scope('VAR'):
-                flows = [LinearChol(self.dim, name='lc_0', use_bias=False)(out_sample[:,0,:])]
-                for i in range(self.len-1):
-                    aux = flows[-1][-1].output
-                    new = LinearChol(self.dim, name='lc_{}'.format(i+1), aux_vars=aux, use_bias=False)(out_sample[:,i+1,:])
-                    flows.append(new)
-                outputs = [x[-1].output for x in flows]
-                outputs = tf.concat(outputs, axis=0)
+            with tf.variable_scope('VAR', dtype=floatX):
+                precholeskis = tf.get_variable('precholeskis', initializer=tf.constant_initializer(.001), shape=[self.len,self.dim,self.dim])
+                aux_vars = tf.get_variable('aux_vars', initializer=tf.constant_initializer(0.), shape=[self.len, self.dim, self.dim])
+                lower_diag = tf.matrix_band_part(precholeskis, -1,0)
+
+                diag_mask = tf.tile(tf.diag(tf.ones(self.dim, dtype=floatX))[tf.newaxis], [self.len, 1,1])
+
+                masked_diag = lower_diag*diag_mask
+                choleskis = lower_diag*(1-diag_mask) + tf.exp(masked_diag)
+
+                def step(prev, x):
+                    nv = x[0][tf.newaxis]
+                    prev = prev[tf.newaxis]
+                    chol = x[1]
+                    aux_v = x[2]
+                    #print(nv, prev, chol, aux_v)
+                    return (tf.matmul(nv, chol) + tf.matmul(prev, aux_v))[0]
+                    
+                outputs = tf.scan(step, elems=[out_sample, choleskis, aux_vars], initializer=tf.zeros(self.dim, dtype=floatX))
+                print(outputs)
 
                 addmu = tf.get_variable('mu', initializer=tf.zeros([self.len,self.dim], dtype=floatX))
                 addmu = tf.cumsum(addmu)
-                outputs = tf.cumsum(outputs) #какая-то сомнительная строчка
+                outputs = tf.cumsum(outputs)
 
                 if self.mu is not None:
                     addmu -= tf.reduce_mean(addmu, axis=0)[tf.newaxis]
                     addmu += self.mu
-                    print(addmu)
 
                 outputs += addmu
                 outputs = outputs[tf.newaxis]
                 
                 with tf.name_scope('logdens'):
-                    self.logdens = -tf.reduce_sum([flow[-1].logj for flow in flows]) + init.logdens(out_sample)
+                    self.logdens = -tf.reduce_sum(masked_diag) + init.logdens(out_sample)
                     
                 return outputs

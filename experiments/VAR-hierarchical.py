@@ -25,7 +25,7 @@ for i, data in enumerate(datas):
     
     new_data = np.concatenate([data.values.T[1:], data.values.T[:-1]], axis=1)
     new_data_columns = data.columns[1:]
-    new_data = pd.DataFrame(new_data.T, columns=new_data_columns)
+    new_data = pd.DataFrame(new_data.T*100., columns=new_data_columns)
     data = new_data
     datas[i] = data
     print(data.columns)

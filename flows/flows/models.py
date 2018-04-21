@@ -83,9 +83,10 @@ class VARmodel:
         return outputs
 
     def create_observ_dispersion_inference(self, prior_disp):
+        print('Prior disp: {}'.format(prior_disp))
         with tf.variable_scope('obs_d_inf', reuse=tf.AUTO_REUSE):
 #             ldiag = DFlow([NVPFlow(dim=3, name='ldiag_flow_' + str(i)) for i in range(2)], init_sigma=0.05)
-            ldiag = DFlow([LinearChol(dim=self.var_dim, name='ldiag_flow_' + str(i)) for i in range(1)], init_sigma=0.05)
+            ldiag = DFlow([LinearChol(dim=self.var_dim, name='ldiag_flow_' + str(i)) for i in range(1)], init_sigma=0.001)
 
             ldiag.output -= 0.5*math.log(prior_disp)
             ldiag.logdens -= tf.reduce_sum(ldiag.output, axis=-1)
