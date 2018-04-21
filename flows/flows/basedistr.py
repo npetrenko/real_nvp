@@ -106,6 +106,12 @@ class MVNormal(Distribution):
                 return tf.reduce_sum(tmp)
             else:
                 return tmp
+    def sample(self):
+        with tf.variable_scope(self.scope):
+            # x^T.FS.FS^T.x => EPS = i(FS).i(FS.T)
+            Ifsigma = tf.linalg.inv(self.fsigma)
+            base = tf.random_normal([self.dim,1], dtype=floatX)
+            return tf.matmul(Ifsigma, base)[:,0]
 
 class MVNormalRW(MVNormal):
     def __init__(self, dim, sigma=1., sigma0=1., name='MVNormalRW', lowerd=None, ldiag=None):
