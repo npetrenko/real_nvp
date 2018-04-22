@@ -49,7 +49,8 @@ class VARmodel:
             s1 = 0.01/4
             df = self.dim[0]*self.dim[1]
             pmat = np.diag([(1/s1**2)]*(self.dim[0]*self.dim[1]))/df
-            cov_prior = WishartCholesky(df, pmat.astype(floatX), cholesky_input_output_matrices=True)
+            #cov_prior = WishartCholesky(df, pmat.astype(floatX), cholesky_input_output_matrices=True)
+            cov_prior = LogNormal(dim=None, mu=-math.log(0.01), sigma=0.8, name='cov_prior')
 
             with tf.variable_scope('PWalk_inf'):
                 with tf.variable_scope('flows'):
@@ -62,7 +63,8 @@ class VARmodel:
 
                     self.logdensities.append(tf.reduce_sum(ldiag.logdens))
                 PWalk = MVNormalRW(dim=self.dim[0]*self.dim[1], sigma0=None, ldiag=ldiag.output[0], name='OrdWalk')
-                self.priors.append(cov_prior.log_prob(PWalk.fsigma))
+                #self.priors.append(cov_prior.log_prob(PWalk.fsigma))
+                self.priors.append(cov_prior.logdens(tf.exp(ldiag.output)))
                 self.PWalk = PWalk
                 tf.summary.scalar('s1_ord', tf.reduce_mean(tf.sqrt(tf.diag_part(PWalk.sigma))))
 
