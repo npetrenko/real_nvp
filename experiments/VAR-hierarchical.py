@@ -113,7 +113,7 @@ init = tf.global_variables_initializer()
 
 init.run()
 
-writer = tf.summary.FileWriter('/home/ubuntu/tblogs/custom_gvar_4')
+writer = tf.summary.FileWriter('/home/ubuntu/tblogs/custom_gvar_5')
 
 def validate_year(year):
     cdic = {model.name:model for model in models}
@@ -127,7 +127,8 @@ def validate_year(year):
             
     mean_pred = {k:np.mean(v, axis=0) for k,v in preds.items()}
     for c, pred in mean_pred.items():
-        pred_years = list(range(year+1, year+len(pred)+1))
+        pred_years = [x for x in YEARS if x > year]
+        #pred_years = list(range(year+1, year+len(pred)+1))
         pred = pd.DataFrame(pred.T, columns=pred_years)
         mean_pred[c] = pred
 
@@ -139,7 +140,9 @@ def validate_year(year):
         mean_pred[model.name]['CYEAR={}'.format(year)] = a
     return mean_pred
 
-for epoch in tqdm(range(1500)):
+saver = tf.train.Saver()
+
+for epoch in tqdm(range(2)):
     fd = {current_year:YEARS[0]}
     for step in range(100):
         sess.run(main_op, fd)
@@ -149,12 +152,13 @@ for epoch in tqdm(range(1500)):
 validations = []
 for year in tqdm(YEARS):
     fd = {current_year: year}
-    for epoch in range(epoch, epoch+300//4):
+    for epoch in range(epoch, epoch+8//4):
         for step in range(100):
             sess.run(main_op, fd)
         s, _ = sess.run([summary, main_op], fd)
         writer.add_summary(s, global_step=epoch)
     validations.append(validate_year(year))
 
+    saver.save(sess, 'save')
     with open('output.pkl', 'wb') as f:
         pkl.dump(validations,f)
