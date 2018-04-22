@@ -46,30 +46,25 @@ class VARmodel:
     def create_rw_priors(self):
         dim = self.dim
         with tf.variable_scope('rw_priors'):
-            with tf.variable_scope('walk_ord'):
-                s1_prior_d = LogNormal(1, mu=math.log(0.01), sigma=6., name='s1_prior')
+            s1 = 0.01/4
+            df = self.dim[0]*self.dim[1]
+            pmat = np.diag([(1/s1**2)]*(self.dim[0]*self.dim[1]))/df
+            cov_prior = WishartCholesky(df, pmat.astype(floatX), cholesky_input_output_matrices=True)
 
-                with tf.variable_scope('s1_inference', dtype=floatX):
-                    mu = tf.get_variable('mu', shape=[1],
-                                         initializer=tf.constant_initializer(s1_prior_d.mu))
+            with tf.variable_scope('PWalk_inf'):
+                with tf.variable_scope('flows'):
+                    flow_conf = [NVPFlow(dim=self.dim[0]*self.dim[1], name='nvp_{}'.format(i)) for i in range(4)] + \
+                        [LinearChol(dim=self.dim[0]*self.dim[1], name='lc')]
+                    ldiag = DFlow(flow_conf)
+                    ldiag.output += math.log(1/s1)
+                    ldiag.logdens -= tf.reduce_sum(ldiag.output, axis=-1)[:,tf.newaxis]
+                    print('ldiag logdens', ldiag.logdens)
 
-                    logsigma_init = tf.constant_initializer(min(math.log(s1_prior_d.sigma), -1.))
-                    logsigma = tf.get_variable('logsigma', shape=[1],
-                                               initializer=logsigma_init)
-                    sigma = tf.exp(logsigma)
-                    s1_d = LogNormal(1, mu=mu, sigma=sigma)
-
-                s1 = s1_d.sample()
-
-                self.create_summary(tf.summary.scalar, 's1_ord', s1[0])
-
-                self.logdensities.append(s1_d.logdens(s1))
-
-                s1_prior = s1_prior_d.logdens(s1)
-                self.priors.append(s1_prior)
-
-            PWalk = NormalRW(dim=None, sigma0=None, mu0=None, sigma=s1, name='OrdWalk')
-            self.PWalk = PWalk
+                    self.logdensities.append(tf.reduce_sum(ldiag.logdens))
+                PWalk = MVNormalRW(dim=self.dim[0]*self.dim[1], sigma0=None, ldiag=ldiag.output[0], name='OrdWalk')
+                self.priors.append(cov_prior.log_prob(PWalk.fsigma))
+                self.PWalk = PWalk
+                tf.summary.scalar('s1_ord', tf.reduce_mean(tf.sqrt(tf.diag_part(PWalk.sigma))))
 
     def create_walk_inference(self, mu=None):
         dim = self.dim

@@ -113,7 +113,7 @@ init = tf.global_variables_initializer()
 
 init.run()
 
-writer = tf.summary.FileWriter('/home/ubuntu/tblogs/custom_gvar_5')
+writer = tf.summary.FileWriter('/home/nikita/tmp/tblogs/custom_gvar_5_wcov2')
 
 def validate_year(year):
     cdic = {model.name:model for model in models}
@@ -142,7 +142,7 @@ def validate_year(year):
 
 saver = tf.train.Saver()
 
-for epoch in tqdm(range(2)):
+for epoch in tqdm(range(2500)):
     fd = {current_year:YEARS[0]}
     for step in range(100):
         sess.run(main_op, fd)
@@ -152,13 +152,13 @@ for epoch in tqdm(range(2)):
 validations = []
 for year in tqdm(YEARS):
     fd = {current_year: year}
-    for epoch in range(epoch, epoch+8//4):
+    for epoch in range(epoch, epoch+80//4):
         for step in range(100):
             sess.run(main_op, fd)
         s, _ = sess.run([summary, main_op], fd)
         writer.add_summary(s, global_step=epoch)
     validations.append(validate_year(year))
 
-    saver.save(sess, 'save')
+    saver.save(sess, '/home/nikita/tmp/gvar_save_wcov2')
     with open('output.pkl', 'wb') as f:
         pkl.dump(validations,f)

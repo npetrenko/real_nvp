@@ -117,7 +117,11 @@ class MVNormalRW(MVNormal):
     def __init__(self, dim, sigma=1., sigma0=1., name='MVNormalRW', lowerd=None, ldiag=None):
         super().__init__(dim=dim, sigma=sigma, name=name, lowerd=lowerd, ldiag=ldiag)
         with tf.variable_scope(self.scope):
-            self.init_distr = MVNormal(dim, sigma0, name='init_distr')
+            if sigma0 is not None:
+                self.init_distr = MVNormal(dim, sigma0, name='init_distr')
+            else:
+                self.init_distr = Distribution(name='init_distr')
+                self.init_distr.logdens = lambda *x, **y: 0.
 
     def logdens(self, x, reduce=True):
         assert len(x.shape) >= 2
