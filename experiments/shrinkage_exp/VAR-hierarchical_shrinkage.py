@@ -14,7 +14,7 @@ np.random.seed(1234)
 tf.set_random_seed(1234)
 
 ccodes = ['AUS', 'FRA', 'GBR']
-datas = ['../CDATA/{}.csv'.format(x) for x in ccodes]
+datas = ['../../CDATA/{}.csv'.format(x) for x in ccodes]
 
 datas = [pd.read_csv(x, index_col='VARIABLE').iloc[:,:-1] for x in datas]
 
@@ -54,18 +54,25 @@ tf.summary.scalar('current_year', current_year)
 global_inf = DFlow([NVPFlow(dim=(VAR_DIM*2+1)*VAR_DIM, name='flow_{}'.format(i)) for i in range(6)], init_sigma=0.08)
 global_prior = Normal(None, sigma=.3).logdens(global_inf.output)
 tf.add_to_collection('priors', global_prior)
-tf.add_to_collection('logdensities', global_inf.logdens)
+tf.add_to_collection('logdensities', global_inf.logdens[0])
 
 
 
 with tf.variable_scope('variation_rate', dtype=floatX):
-    variation_prerate = tf.get_variable('prerate',trainable=False, initializer=math.log(0.1))
-    variation_rate = tf.exp(variation_prerate)
-    variation = variation_rate#variation_d.sample()
-
-    variation = tf.cast(variation, floatX)
+    variation_prior = tf.distributions.Exponential(rate=1.)
+    dim_ = (VAR_DIM*2+1)*VAR_DIM
+    variation_mu = tf.get_variable('mu',trainable=False, shape=[dim_], initializer=tf.constant_initializer(math.log(0.3)))
+    variation_presigma = tf.get_variable('presigma', trainable=True, shape=[dim_], initializer=tf.constant_initializer(-3.))
+    variation_d = LogNormal(dim=dim_, mu=variation_mu, sigma=tf.exp(variation_presigma))
     
-    tf.summary.scalar('variation', variation)
+    variation = variation_d.sample()
+
+    pp = tf.cast(tf.reduce_sum(variation_prior.log_prob(tf.cast(variation, tf.float32))), floatX)
+    ld = variation_d.logdens(variation)
+    tf.add_to_collection('logdensities', ld)
+    tf.add_to_collection('priors', pp)
+
+    tf.summary.scalar('mean_variation', tf.reduce_mean(variation))
 
 individ_variation_prior = Normal((VAR_DIM*2+1)*VAR_DIM, sigma=variation, mu=global_inf.output[0])
 
@@ -90,8 +97,6 @@ with tf.variable_scope(tf.get_variable_scope(), dtype=floatX, reuse=tf.AUTO_REUS
         model = VARmodel(data, name='{}_model'.format(country), var_dim=VAR_DIM, mu=ind[tf.newaxis], current_year=current_year)
         models.append(model)
 
-indiv_logdens
-
 graph = tf.get_default_graph()
 
 prior = tf.reduce_sum([model.priors for model in models])+ tf.reduce_sum(indiv_priors) + tf.reduce_sum(graph.get_collection('priors'))
@@ -113,7 +118,7 @@ init = tf.global_variables_initializer()
 
 init.run()
 
-writer = tf.summary.FileWriter('/home/nikita/tmp/tblogs/custom_gvar_logncov_with_nvpobsd_better_pd_fixed_mvnormal_variation0.1')
+writer = tf.summary.FileWriter('/home/nikita/tmp/tblogs/custom_gvar_exp_variation')
 
 def validate_year(year):
     cdic = {model.name:model for model in models}
@@ -128,7 +133,6 @@ def validate_year(year):
     mean_pred = {k:np.mean(v, axis=0) for k,v in preds.items()}
     for c, pred in mean_pred.items():
         pred_years = [x for x in YEARS if x > year]
-        #pred_years = list(range(year+1, year+len(pred)+1))
         pred = pd.DataFrame(pred.T, columns=pred_years)
         mean_pred[c] = pred
 
@@ -159,6 +163,6 @@ for year in tqdm(YEARS):
         writer.add_summary(s, global_step=epoch)
     validations.append(validate_year(year))
 
-    saver.save(sess, '/home/nikita/tmp/gvar_save_logncov_with_nvpobsd_better_pd_fixed_mvnormal')
-    with open('output.pkl', 'wb') as f:
+    saver.save(sess, './save/custom_gvar_exp_variation')
+    with open('output_evar.pkl', 'wb') as f:
         pkl.dump(validations,f)
