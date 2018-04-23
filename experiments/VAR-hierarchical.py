@@ -113,7 +113,7 @@ init = tf.global_variables_initializer()
 
 init.run()
 
-writer = tf.summary.FileWriter('/home/nikita/tmp/tblogs/custom_gvar_logncov')
+writer = tf.summary.FileWriter('/home/nikita/tmp/tblogs/custom_gvar_logncov_with_nvpobsd_better_pd')
 
 def validate_year(year):
     cdic = {model.name:model for model in models}
@@ -159,6 +159,6 @@ for year in tqdm(YEARS):
         writer.add_summary(s, global_step=epoch)
     validations.append(validate_year(year))
 
-    saver.save(sess, '/home/nikita/tmp/gvar_save_logncov')
+    saver.save(sess, '/home/nikita/tmp/gvar_save_logncov_with_nvpobsd_better_pd')
     with open('output.pkl', 'wb') as f:
         pkl.dump(validations,f)

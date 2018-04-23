@@ -94,7 +94,6 @@ class MVNormal(Distribution):
             self.fsigma = fsigma
             self.logdet = -2*tf.reduce_sum(ldiag) 
             self.inverse_sigma = isigma
-            self.fsigma = fsigma
             self.sigma = tf.linalg.inv(isigma)
 
     def logdens(self, x, reduce=True):

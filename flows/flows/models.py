@@ -26,7 +26,7 @@ class VARmodel:
 
         self.observable_mask = tf.range(0, self.NUM_STEPS, dtype=tf.int32) < self.OBSERV_STEPS
 
-        pd = np.mean(np.std(data.values[:,1:] - data.values[:,:-1], axis=-1))
+        pd = np.std(data.values[:,1:] - data.values[:,:-1], axis=-1).astype(floatX)[:self.var_dim]
 
         with tf.variable_scope(name) as scope:
             self.data = tf.get_variable(initializer=data.values.T[np.newaxis],
@@ -47,24 +47,20 @@ class VARmodel:
         dim = self.dim
         with tf.variable_scope('rw_priors'):
             s1 = 0.01/4
-            df = self.dim[0]*self.dim[1]
-            pmat = np.diag([(1/s1**2)]*(self.dim[0]*self.dim[1]))/df
-            #cov_prior = WishartCholesky(df, pmat.astype(floatX), cholesky_input_output_matrices=True)
-            cov_prior = LogNormal(dim=None, mu=-math.log(0.01), sigma=0.8, name='cov_prior')
+            cov_prior = Normal(dim=None, mu=0.5*math.log(1/s1), sigma=3.5, name='cov_prior')
 
             with tf.variable_scope('PWalk_inf'):
                 with tf.variable_scope('flows'):
                     flow_conf = [NVPFlow(dim=self.dim[0]*self.dim[1], name='nvp_{}'.format(i)) for i in range(4)] + \
                         [LinearChol(dim=self.dim[0]*self.dim[1], name='lc')]
                     ldiag = DFlow(flow_conf)
-                    ldiag.output += math.log(1/s1)
+                    ldiag.output += 0.5*math.log(1/s1)
                     ldiag.logdens -= tf.reduce_sum(ldiag.output, axis=-1)[:,tf.newaxis]
                     print('ldiag logdens', ldiag.logdens)
 
                     self.logdensities.append(tf.reduce_sum(ldiag.logdens))
                 PWalk = MVNormalRW(dim=self.dim[0]*self.dim[1], sigma0=None, ldiag=ldiag.output[0], name='OrdWalk')
-                #self.priors.append(cov_prior.log_prob(PWalk.fsigma))
-                self.priors.append(cov_prior.logdens(tf.exp(ldiag.output)))
+                self.priors.append(cov_prior.logdens(ldiag.output))
                 self.PWalk = PWalk
                 tf.summary.scalar('s1_ord', tf.reduce_mean(tf.sqrt(tf.diag_part(PWalk.sigma))))
 
@@ -82,17 +78,18 @@ class VARmodel:
     def create_observ_dispersion_inference(self, prior_disp):
         print('Prior disp: {}'.format(prior_disp))
         with tf.variable_scope('obs_d_inf', reuse=tf.AUTO_REUSE):
-#             ldiag = DFlow([NVPFlow(dim=3, name='ldiag_flow_' + str(i)) for i in range(2)], init_sigma=0.05)
-            ldiag = DFlow([LinearChol(dim=self.var_dim, name='ldiag_flow_' + str(i)) for i in range(1)], init_sigma=0.05)
+            flow_conf = [NVPFlow(dim=self.var_dim, name='nvp_{}'.format(i)) for i in range(6)] + \
+                [LinearChol(dim=self.var_dim, name='lc')]
+            ldiag = DFlow(flow_conf, init_sigma=0.05)
 
-            ldiag.output -= 0.5*math.log(prior_disp)
+            ldiag.output -= 0.5*np.log(prior_disp).astype(floatX)
             ldiag.logdens -= tf.reduce_sum(ldiag.output, axis=-1)
 
         self.obs_d = MVNormal(self.var_dim, sigma=None, name='obs_d_prior',
                    ldiag=ldiag.output[0])
 
         df = self.var_dim
-        pmat = np.diag([(2./prior_disp)]*self.var_dim)/df
+        pmat = np.diag(2./prior_disp)/df
         cov_prior = WishartCholesky(df, pmat, cholesky_input_output_matrices=True)
 
         pr = cov_prior.log_prob(self.obs_d.fsigma)
