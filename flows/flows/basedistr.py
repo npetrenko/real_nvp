@@ -98,13 +98,18 @@ class MVNormal(Distribution):
 
     def logdens(self, x, reduce=True):
         with tf.variable_scope(self.scope):
-            #reduction happens only on the last dimension:
-            norms = tf.reduce_sum(tf.square(tf.tensordot(x, self.fsigma, [[-1], [0]])), axis=-1)
-            tmp = -0.5*norms - (self.dim/2)*np.log(2*np.pi) - 0.5*(self.logdet + tf.cast(tf.shape(x)[-1], floatX)*tf.log(tf.cast(2*math.pi, floatX)))
+            #reduction happens only on the last dimension
+            x_shape = tf.shape(x)
+            x = tf.reshape(x, [-1, x.shape[-1]])
+            resid_shape = x_shape[:-1]
+
+            norms = tf.reduce_sum(tf.square(tf.matmul(x, self.fsigma)), axis=-1)
+            print(norms)
+            tmp = -0.5*norms - (self.dim/2)*np.log(2*np.pi) - 0.5*(self.logdet + tf.cast(tf.shape(x)[-1], floatX)*math.log(2*math.pi))
             if reduce:
                 return tf.reduce_sum(tmp)
             else:
-                return tmp
+                return tf.reshape(tmp, resid_shape)
     def sample(self):
         with tf.variable_scope(self.scope):
             # x^T.FS.FS^T.x => EPS = i(FS).i(FS.T)

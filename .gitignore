@@ -6,4 +6,4 @@ flows/build
 __pycache__
 MNIST-data
 *.pkl
-./experiments/finished
+experiments/finished
