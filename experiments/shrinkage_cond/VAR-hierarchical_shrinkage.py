@@ -50,19 +50,11 @@ country_data = {c:d for c,d in zip(ccodes, datas)}
 current_year = tf.placeholder(tf.float32, shape=(), name='current_year')
 tf.summary.scalar('current_year', current_year)
 
-
-global_inf = DFlow([NVPFlow(dim=(VAR_DIM*2+1)*VAR_DIM, name='flow_{}'.format(i)) for i in range(6)], init_sigma=0.08)
-global_prior = Normal(None, sigma=.3).logdens(global_inf.output)
-tf.add_to_collection('priors', global_prior)
-tf.add_to_collection('logdensities', global_inf.logdens[0])
-
-
-
 with tf.variable_scope('variation_rate', dtype=floatX):
     variation_prior = tf.distributions.Exponential(rate=.3)
     dim_ = (VAR_DIM*2+1)*VAR_DIM
-    variation_mu = tf.get_variable('mu',trainable=False, shape=[dim_], initializer=tf.constant_initializer(math.log(0.3)))
-    variation_presigma = tf.get_variable('presigma', trainable=True, shape=[dim_], initializer=tf.constant_initializer(-3.))
+    variation_mu = tf.get_variable('mu', shape=[dim_], initializer=tf.constant_initializer(math.log(0.3)))
+    variation_presigma = tf.get_variable('presigma', shape=[dim_], initializer=tf.constant_initializer(-3.))
     variation_d = LogNormal(dim=dim_, mu=variation_mu, sigma=tf.exp(variation_presigma))
     
     variation = variation_d.sample()
@@ -75,6 +67,11 @@ with tf.variable_scope('variation_rate', dtype=floatX):
     tf.summary.histogram('variation', variation)
     tf.summary.scalar('mean_variation', tf.reduce_mean(variation))
 
+global_inf = DFlow([NVPFlow(dim=(VAR_DIM*2+1)*VAR_DIM, name='flow_{}'.format(i), aux_vars=variation[tf.newaxis]) for i in range(6)], init_sigma=0.01)
+global_prior = Normal(None, sigma=1.).logdens(global_inf.output)
+tf.add_to_collection('priors', global_prior)
+tf.add_to_collection('logdensities', global_inf.logdens[0])
+
 individ_variation_prior = Normal((VAR_DIM*2+1)*VAR_DIM, sigma=variation, mu=global_inf.output[0])
 
 models = []
@@ -85,11 +82,12 @@ indivs = {}
 with tf.variable_scope(tf.get_variable_scope(), dtype=floatX, reuse=tf.AUTO_REUSE):
     for country, data in country_data.items():
         with tf.variable_scope(country):
+            aux = tf.concat([global_inf.output, variation[tf.newaxis]], axis=-1)
             individ_variation = DFlow([NVPFlow((VAR_DIM*2+1)*VAR_DIM, 
                                                name='nvp_{}'.format(i), 
-                                               aux_vars=global_inf.output) for i in range(6)], init_sigma=0.01)
+                                               aux_vars=aux) for i in range(6)], init_sigma=0.01)
 
-            ind = individ_variation.output[0]
+            ind = individ_variation.output[0] + global_inf.output[0]
             indivs[country] = ind
 
             indiv_logdens.append(individ_variation.logdens)
@@ -119,7 +117,7 @@ init = tf.global_variables_initializer()
 
 init.run()
 
-writer = tf.summary.FileWriter('/home/nikita/tmp/tblogs/custom_gvar_exp_variation_rate0.3')
+writer = tf.summary.FileWriter('/home/nikita/tmp/tblogs/custom_gvar_indiv_var_fullcond')
 
 def validate_year(year):
     cdic = {model.name:model for model in models}
@@ -164,6 +162,6 @@ for year in tqdm(YEARS):
         writer.add_summary(s, global_step=epoch)
     validations.append(validate_year(year))
 
-    saver.save(sess, './save/custom_gvar_exp_variation_rate0.3')
-    with open('output_evar_rate0.3.pkl', 'wb') as f:
+    saver.save(sess, './save/custom_gvar_fullcond')
+    with open('output_evar_fullcond.pkl', 'wb') as f:
         pkl.dump(validations,f)

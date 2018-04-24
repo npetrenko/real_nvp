@@ -98,7 +98,8 @@ class VARmodel:
 
         sigmas = tf.diag_part(self.obs_d.sigma)
 
-        std = tf.nn.moments(self.data[0,1:,:self.var_dim] - self.data[0,:-1,:self.var_dim], axes=[0])[1]
+        current_data = self.data[:,:self.OBSERV_STEPS]
+        std = tf.nn.moments(current_data[0,1:,:self.var_dim] - current_data[0,:-1,:self.var_dim], axes=[0])[1]
         print(std, sigmas)
         rsquareds = 1 - sigmas/std
         self.create_summary(tf.summary.scalar, 'rsquared_post_mean', tf.reduce_mean(rsquareds))
