@@ -72,6 +72,7 @@ with tf.variable_scope('variation_rate', dtype=floatX):
     tf.add_to_collection('logdensities', ld)
     tf.add_to_collection('priors', pp)
 
+    tf.summary.histogram('variation', variation)
     tf.summary.scalar('mean_variation', tf.reduce_mean(variation))
 
 individ_variation_prior = Normal((VAR_DIM*2+1)*VAR_DIM, sigma=variation, mu=global_inf.output[0])
@@ -118,7 +119,7 @@ init = tf.global_variables_initializer()
 
 init.run()
 
-writer = tf.summary.FileWriter('/home/nikita/tmp/tblogs/custom_gvar_exp_variation')
+writer = tf.summary.FileWriter('/home/nikita/tmp/tblogs/custom_gvar_exp_variation2')
 
 def validate_year(year):
     cdic = {model.name:model for model in models}
@@ -163,6 +164,6 @@ for year in tqdm(YEARS):
         writer.add_summary(s, global_step=epoch)
     validations.append(validate_year(year))
 
-    saver.save(sess, './save/custom_gvar_exp_variation')
+    saver.save(sess, './save/custom_gvar_exp_variation2')
     with open('output_evar.pkl', 'wb') as f:
         pkl.dump(validations,f)
