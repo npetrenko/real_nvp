@@ -174,13 +174,13 @@ class LinearChol(Flow):
             output = tf.matmul(prev_flow_output, fsigma)
 
             if self.aux_vars is not None:
-                with tf.variable_scope('aux'):
+                with tf.variable_scope('aux', initializer=tf.random_normal_initializer(stddev=0.001)):
                     aux = self.aux_vars
                     sh = int(aux.shape[-1])
-                    W = tf.get_variable('W', initializer=tf.random_normal([sh, self.dim], stddev=0.001))
+                    W = tf.get_variable('W', shape=[sh, self.dim])
                     output += tf.matmul(aux, W)
                     with tf.variable_scope('scaling'):
-                        scaler_mat = tf.get_variable('scaler_mat', initializer=tf.random.normal([sh, self.dim], stddev=0.001))
+                        scaler_mat = tf.get_variable('scaler_mat', shape=[sh, self.dim])
                         logscale = tf.matmul(aux, scaler_mat)
                         self.logj += tf.reduce_sum(logscale, axis=-1)
                         output *= tf.exp(logscale)
