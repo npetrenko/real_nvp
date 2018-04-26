@@ -117,27 +117,27 @@ class MVNormal(Distribution):
             base = tf.random_normal([self.dim,1], dtype=floatX)
             return tf.matmul(Ifsigma, base)[:,0]
 
-class MVNormalRW(MVNormal):
-    def __init__(self, dim, sigma=1., sigma0=1., name='MVNormalRW', lowerd=None, ldiag=None):
-        super().__init__(dim=dim, sigma=sigma, name=name, lowerd=lowerd, ldiag=ldiag)
+class MVNormalRW(Distribution):
+    def __init__(self, dim, sigma0=1., name='MVNormalRW', diag=None):
+        super().__init__(name=name, dim=dim)
+        self.diag = diag
         with tf.variable_scope(self.scope):
             if sigma0 is not None:
-                self.init_distr = MVNormal(dim, sigma0, name='init_distr')
+                self.init_distr = Normal(dim, sigma=sigma0, name='init_distr')
             else:
                 self.init_distr = Distribution(name='init_distr')
-                self.init_distr.logdens = lambda *x, **y: 0.
+                self.init_distr.logdens = lambda *x, **y: tf.constant(0., dtype=floatX)
 
-    def logdens(self, x, reduce=True):
+    def logdens(self, x):
         assert len(x.shape) >= 2
         with tf.variable_scope(self.scope):
             with tf.name_scope('logdens'):
                 norms = x[:,1:] - x[:,:-1]
-                if reduce:
-                    ll = super().logdens(norms, reduce=reduce) + self.init_distr.logdens(x[:,0], reduce=reduce)
-                else:
-                    init_ll = self.init_distr.logdens(x[:,0], reduce=reduce)[:, tf.newaxis]
-                    cont_ll = super().logdens(norms, reduce=reduce)
-                    ll = tf.concat([init_ll, cont_ll], axis=1)
+
+                init_ll = tf.reduce_sum(self.init_distr.logdens(x[:,0], reduce=False), axis=-1)
+                cont_ll = tf.reduce_sum(tf.distributions.Normal(loc=tf.constant(0., dtype=floatX), 
+                                                                scale=self.diag[:,tf.newaxis,:]).log_prob(norms), axis=-1)
+                ll = tf.concat([init_ll[:,tf.newaxis], cont_ll], axis=1)
                     
             return ll
     
@@ -307,9 +307,10 @@ class Gumbel:
 
 
 class GVAR(Distribution):
-    def __init__(self, dim, len, name=None, mu=None):
+    def __init__(self, dim, len, name=None, mu=None, num_samples=1):
         super().__init__(dim=dim, name=name)
         self.len = len
+        self.num_samples = num_samples
         self.logdens = None #property to hold logdensity of the last sample
         self.mu = mu
 
@@ -317,7 +318,7 @@ class GVAR(Distribution):
         from flows import LinearChol
         with tf.variable_scope(self.scope, reuse=tf.AUTO_REUSE):
 
-            init = Normal([self.len, self.dim], sigma=0.01)
+            init = Normal([self.len, self.num_samples, self.dim], sigma=0.01)
             out_sample = init.sample() 
 
             with tf.variable_scope('VAR', dtype=floatX, initializer=tf.random_normal_initializer(stddev=0.001)):
@@ -328,31 +329,18 @@ class GVAR(Distribution):
 
                 choleskis = precholeskis - tf.matrix_band_part(precholeskis, 0, -1)
 
-                scan = True
-                if scan:
-                    def step(prev, x):
-                        nv = x[0][tf.newaxis]
-                        prev = prev[tf.newaxis]
-                        chol = x[1]
-                        aux_v = x[2]
-                        return (tf.matmul(nv, chol) + tf.matmul(prev, aux_v))[0]
-                        
-                    outputs = tf.scan(step, elems=[out_sample, choleskis, aux_vars], initializer=tf.zeros(self.dim, dtype=floatX))
-                else:
-                    outputs = []
-                    prev = tf.zeros(self.dim, dtype=floatX)
-                    for i in range(self.len):
-                        nv = out_sample[i][tf.newaxis]
-                        chol = choleskis[i]
-                        aux_v = aux_vars[i]
-                        prev = prev[tf.newaxis]
-                        prev = (tf.matmul(nv, chol) + tf.matmul(prev, aux_v))[0]
-                        outputs.append(prev)
-                    outputs = tf.stack(outputs)
+                def step(prev, x):
+                    nv = x[0]
+                    prev = prev
+                    chol = x[1]
+                    aux_v = x[2]
+                    return tf.matmul(nv, chol) + tf.matmul(prev, aux_v)
+                    
+                outputs = tf.scan(step, elems=[out_sample, choleskis, aux_vars], initializer=tf.zeros([self.num_samples, self.dim], dtype=floatX))
 
-                outputs += tf.exp(precholeskis_diag)*out_sample
+                outputs += tf.exp(precholeskis_diag)[:,tf.newaxis,:]*out_sample
 
-                addmu = tf.get_variable('mu', initializer=tf.zeros([self.len,self.dim], dtype=floatX))
+                addmu = tf.get_variable('mu', initializer=tf.zeros([self.len,1,self.dim], dtype=floatX))
                 addmu = tf.cumsum(addmu)
                 outputs = tf.cumsum(outputs)
 
@@ -361,9 +349,9 @@ class GVAR(Distribution):
                     addmu += self.mu
 
                 outputs += addmu
-                outputs = outputs[tf.newaxis]
+                outputs = tf.transpose(outputs, [1,0,2])
                 
                 with tf.name_scope('logdens'):
-                    self.logdens = -tf.reduce_sum(precholeskis_diag) + init.logdens(out_sample)
+                    self.logdens = -tf.reduce_sum(precholeskis_diag) + tf.reduce_sum(init.logdens(out_sample, reduce=False), [0,2])
                     
                 return outputs

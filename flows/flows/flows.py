@@ -70,19 +70,20 @@ class FlowSequence(Sequence):
         return logj
 
 class DFlow:
-    def __init__(self, flows, init_sigma=1., base=None):
+    def __init__(self, flows, init_sigma=1., base=None, num_samples=1):
+        self.num_samples = num_samples
         if base is None:
-            base = Normal([1, flows[-1].dim], sigma=init_sigma)
+            base = Normal([num_samples, flows[-1].dim], sigma=init_sigma)
 
         fseq = FlowSequence(flows)
 
         if not isinstance(fseq[-1], CFlow):
             if isinstance(base, Distribution):
                 bsamp = base.sample()
-                bld = base.logdens(bsamp)
+                bld = tf.reduce_sum(base.logdens(bsamp, reduce=False), axis=-1)
             elif isinstance(base, Flow):
                 bsamp = base.output
-                bld = base.logj[0]
+                bld = base.logj
             else:
                 raise NotImplementedError
 
