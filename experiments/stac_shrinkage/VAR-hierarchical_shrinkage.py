@@ -1,6 +1,6 @@
 import tensorflow as tf
 from flows import NormalRW, DFlow, NVPFlow, LogNormal, GVAR, phase,Normal, floatX, MVNormal, MVNormalRW, Linear, LinearChol
-from flows.models import VARmodel
+from flows.models import VARmodel, STACmodel
 import flows
 
 import numpy as np
@@ -61,7 +61,7 @@ with tf.variable_scope('variation_rate', dtype=floatX):
 
     pp = tf.cast(tf.reduce_sum(variation_prior.log_prob(tf.cast(variation, tf.float32))), floatX)
     ld = variation_d.logdens(variation)
-    tf.add_to_collection('logdensities', ld)
+    tf.add_to_collection('logdensities', ld[tf.newaxis])
     tf.add_to_collection('priors', pp)
 
     tf.summary.histogram('variation', variation)
@@ -105,7 +105,6 @@ kl /= 36*200*4
 kls = tf.summary.scalar('KLd', kl)
 summary = tf.summary.merge_all()
 
-
 main_op = tf.train.AdamOptimizer(0.0001).minimize(kl)
 
 sess = tf.InteractiveSession()
@@ -113,7 +112,7 @@ init = tf.global_variables_initializer()
 
 init.run()
 
-writer = tf.summary.FileWriter('/home/nikita/tmp/tblogs/stacvar_hier')
+writer = tf.summary.FileWriter('/home/ubuntu/tmp/tblogs/stacvar_hier')
 
 def validate_year(year):
     cdic = {model.name:model for model in models}
@@ -151,7 +150,7 @@ for epoch in tqdm(range(300)):
 validations = []
 for year in tqdm(YEARS):
     fd = {current_year: year}
-    for epoch in range(epoch, epoch+5):
+    for epoch in range(epoch, epoch+20):
         for step in range(100):
             sess.run(main_op, fd)
         s, _ = sess.run([summary, main_op], fd)

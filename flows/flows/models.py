@@ -202,7 +202,7 @@ class STACmodel:
         dim = self.dim
 
         if mu is not None:
-            self.outputs = mu
+            outputs = mu
         else:
             param_flow = DFlow([LinearChol(dim[0]*dim[1], name='lc')], init_sigma=0.01)
             outputs = param_flow.output

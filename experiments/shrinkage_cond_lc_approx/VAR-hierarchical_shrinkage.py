@@ -115,7 +115,7 @@ init = tf.global_variables_initializer()
 
 init.run()
 
-writer = tf.summary.FileWriter('/home/nikita/tmp/tblogs/gvar_hier_fullcond_lc')
+writer = tf.summary.FileWriter('/home/ubuntu/tmp/tblogs/gvar_hier_fullcond_lc')
 
 def validate_year(year):
     cdic = {model.name:model for model in models}
@@ -153,7 +153,7 @@ for epoch in tqdm(range(300)):
 validations = []
 for year in tqdm(YEARS):
     fd = {current_year: year}
-    for epoch in range(epoch, epoch+5):
+    for epoch in range(epoch, epoch+20):
         for step in range(100):
             sess.run(main_op, fd)
         s, _ = sess.run([summary, main_op], fd)
