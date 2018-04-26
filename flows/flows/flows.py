@@ -160,11 +160,9 @@ class LinearChol(Flow):
 
         prev_flow_output = inp_flows[-1].output
 
-        with tf.variable_scope(self.name, reuse=tf.AUTO_REUSE):
+        with tf.variable_scope(self.name, reuse=tf.AUTO_REUSE, dtype=floatX):
             lowerd = tf.get_variable('lowerd', initializer=tf.random_normal(shape=[self.dim + self.dim*(self.dim - 1)//2], dtype=floatX, stddev=0.001))
             ldiag = tf.get_variable('ldiag', initializer=tf.random_normal(shape=[self.dim], dtype=floatX, stddev=0.001))
-            if self.use_bias:
-                bias = tf.get_variable('bias', initializer=np.zeros([1,self.dim], dtype=floatX))
 
             diag_mask = tf.constant(np.diag(np.ones(self.dim)), name='diag_mask', dtype=floatX)
 
@@ -174,14 +172,22 @@ class LinearChol(Flow):
             self.logj = tf.reduce_sum(ldiag)[tf.newaxis]
 
             output = tf.matmul(prev_flow_output, fsigma)
-            if self.use_bias:
-                output += bias
 
             if self.aux_vars is not None:
-                aux = self.aux_vars
-                sh = int(aux.shape[-1])
-                W = tf.get_variable('W', initializer=tf.random_normal([sh, self.dim], stddev=0.001, dtype=floatX))
-                output += tf.matmul(aux, W)
+                with tf.variable_scope('aux'):
+                    aux = self.aux_vars
+                    sh = int(aux.shape[-1])
+                    W = tf.get_variable('W', initializer=tf.random_normal([sh, self.dim], stddev=0.001))
+                    output += tf.matmul(aux, W)
+                    with tf.variable_scope('scaling'):
+                        scaler_mat = tf.get_variable('scaler_mat', initializer=tf.random.normal([sh, self.dim], stddev=0.001))
+                        logscale = tf.matmul(aux, scaler_mat)
+                        self.logj += tf.reduce_sum(logscale, axis=-1)
+                        output *= tf.exp(logscale)
+
+            if self.use_bias:
+                bias = tf.get_variable('bias', initializer=np.zeros([1,self.dim], dtype=floatX))
+                output += bias
             
             if inverse:
                 raise NotImplementedError

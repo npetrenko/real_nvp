@@ -70,13 +70,11 @@ with tf.variable_scope('variation_rate', dtype=floatX):
 global_inf = DFlow([NVPFlow(dim=(VAR_DIM*2+1)*VAR_DIM, name='flow_{}'.format(i), aux_vars=variation[tf.newaxis]) for i in range(6)], init_sigma=0.01)
 global_prior = Normal(None, sigma=1.).logdens(global_inf.output)
 tf.add_to_collection('priors', global_prior)
-tf.add_to_collection('logdensities', global_inf.logdens[0])
+tf.add_to_collection('logdensities', global_inf.logdens)
 
 individ_variation_prior = Normal((VAR_DIM*2+1)*VAR_DIM, sigma=variation, mu=global_inf.output[0])
 
 models = []
-indiv_logdens = []
-indiv_priors = []
 indivs = {}
 
 with tf.variable_scope(tf.get_variable_scope(), dtype=floatX, reuse=tf.AUTO_REUSE):
@@ -90,21 +88,19 @@ with tf.variable_scope(tf.get_variable_scope(), dtype=floatX, reuse=tf.AUTO_REUS
             ind = individ_variation.output[0] + global_inf.output[0]
             indivs[country] = ind
 
-            indiv_logdens.append(individ_variation.logdens)
-            indiv_priors.append(individ_variation_prior.logdens(ind))
-
-        model = VARmodel(data, name='{}_model'.format(country), var_dim=VAR_DIM, mu=ind[tf.newaxis], current_year=current_year)
+            tf.add_to_collection('logdensities', individ_variation.logdens)
+            tf.add_to_collection('priors',individ_variation_prior.logdens(ind))
+        model = STACmodel(data, mu=ind[tf.newaxis], name='{}_model'.format(country), var_dim=VAR_DIM, current_year=current_year)
         models.append(model)
 
 graph = tf.get_default_graph()
 
-prior = tf.reduce_sum([model.priors for model in models])+ tf.reduce_sum(indiv_priors) + tf.reduce_sum(graph.get_collection('priors'))
+prior = tf.reduce_sum([model.priors for model in models]) + tf.reduce_sum(graph.get_collection('priors'))
 
-logdensity = tf.reduce_sum([model.logdensities for model in models])+ tf.reduce_sum(indiv_logdens) + tf.reduce_sum(graph.get_collection('logdensities'))
+logdensity = tf.reduce_sum([model.logdensities for model in models]) + tf.reduce_sum(graph.get_collection('logdensities'))
 
 kl = logdensity - prior
 kl /= 36*200*4
-
 
 kls = tf.summary.scalar('KLd', kl)
 summary = tf.summary.merge_all()
@@ -117,7 +113,7 @@ init = tf.global_variables_initializer()
 
 init.run()
 
-writer = tf.summary.FileWriter('/home/nikita/tmp/tblogs/gvar_hier_fullcond')
+writer = tf.summary.FileWriter('/home/nikita/tmp/tblogs/stacvar_hier')
 
 def validate_year(year):
     cdic = {model.name:model for model in models}
@@ -162,6 +158,6 @@ for year in tqdm(YEARS):
         writer.add_summary(s, global_step=epoch)
     validations.append(validate_year(year))
 
-    saver.save(sess, './save/gvar_hier_fullcond')
-    with open('output_gvar_hier_fullcond.pkl', 'wb') as f:
+    saver.save(sess, './save/stac_hier')
+    with open('output_stac_hier.pkl', 'wb') as f:
         pkl.dump(validations,f)

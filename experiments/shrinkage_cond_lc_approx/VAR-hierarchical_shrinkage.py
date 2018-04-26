@@ -67,7 +67,7 @@ with tf.variable_scope('variation_rate', dtype=floatX):
     tf.summary.histogram('variation', variation)
     tf.summary.scalar('mean_variation', tf.reduce_mean(variation))
 
-global_inf = DFlow([NVPFlow(dim=(VAR_DIM*2+1)*VAR_DIM, name='flow_{}'.format(i), aux_vars=variation[tf.newaxis]) for i in range(6)], init_sigma=0.01)
+global_inf = DFlow([LinearChol(dim=(VAR_DIM*2+1)*VAR_DIM, name='lc', aux_vars=variation[tf.newaxis])], init_sigma=0.01)
 global_prior = Normal(None, sigma=1.).logdens(global_inf.output)
 tf.add_to_collection('priors', global_prior)
 tf.add_to_collection('logdensities', global_inf.logdens[0])
@@ -83,9 +83,7 @@ with tf.variable_scope(tf.get_variable_scope(), dtype=floatX, reuse=tf.AUTO_REUS
     for country, data in country_data.items():
         with tf.variable_scope(country):
             aux = tf.concat([global_inf.output, variation[tf.newaxis]], axis=-1)
-            individ_variation = DFlow([NVPFlow((VAR_DIM*2+1)*VAR_DIM, 
-                                               name='nvp_{}'.format(i), 
-                                               aux_vars=aux) for i in range(6)], init_sigma=0.01)
+            individ_variation = DFlow([LinearChol((VAR_DIM*2+1)*VAR_DIM, name='lc', aux_vars=aux)], init_sigma=0.01)
 
             ind = individ_variation.output[0] + global_inf.output[0]
             indivs[country] = ind
@@ -117,7 +115,7 @@ init = tf.global_variables_initializer()
 
 init.run()
 
-writer = tf.summary.FileWriter('/home/nikita/tmp/tblogs/gvar_hier_fullcond')
+writer = tf.summary.FileWriter('/home/nikita/tmp/tblogs/gvar_hier_fullcond_lc')
 
 def validate_year(year):
     cdic = {model.name:model for model in models}
@@ -162,6 +160,6 @@ for year in tqdm(YEARS):
         writer.add_summary(s, global_step=epoch)
     validations.append(validate_year(year))
 
-    saver.save(sess, './save/gvar_hier_fullcond')
-    with open('output_gvar_hier_fullcond.pkl', 'wb') as f:
+    saver.save(sess, './save/gvar_hier_fullcond_lc')
+    with open('output_gvar_hier_fullcond_lc.pkl', 'wb') as f:
         pkl.dump(validations,f)

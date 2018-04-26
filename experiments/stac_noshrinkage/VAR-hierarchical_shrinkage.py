@@ -1,6 +1,6 @@
 import tensorflow as tf
 from flows import NormalRW, DFlow, NVPFlow, LogNormal, GVAR, phase,Normal, floatX, MVNormal, MVNormalRW, Linear, LinearChol
-from flows.models import VARmodel
+from flows.models import VARmodel, STACmodel
 import flows
 
 import numpy as np
@@ -50,57 +50,18 @@ country_data = {c:d for c,d in zip(ccodes, datas)}
 current_year = tf.placeholder(tf.float32, shape=(), name='current_year')
 tf.summary.scalar('current_year', current_year)
 
-with tf.variable_scope('variation_rate', dtype=floatX):
-    variation_prior = tf.distributions.Exponential(rate=.3)
-    dim_ = (VAR_DIM*2+1)*VAR_DIM
-    variation_mu = tf.get_variable('mu', shape=[dim_], initializer=tf.constant_initializer(math.log(0.3)))
-    variation_presigma = tf.get_variable('presigma', shape=[dim_], initializer=tf.constant_initializer(-3.))
-    variation_d = LogNormal(dim=dim_, mu=variation_mu, sigma=tf.exp(variation_presigma))
-    
-    variation = variation_d.sample()
-
-    pp = tf.cast(tf.reduce_sum(variation_prior.log_prob(tf.cast(variation, tf.float32))), floatX)
-    ld = variation_d.logdens(variation)
-    tf.add_to_collection('logdensities', ld)
-    tf.add_to_collection('priors', pp)
-
-    tf.summary.histogram('variation', variation)
-    tf.summary.scalar('mean_variation', tf.reduce_mean(variation))
-
-global_inf = DFlow([NVPFlow(dim=(VAR_DIM*2+1)*VAR_DIM, name='flow_{}'.format(i), aux_vars=variation[tf.newaxis]) for i in range(6)], init_sigma=0.01)
-global_prior = Normal(None, sigma=1.).logdens(global_inf.output)
-tf.add_to_collection('priors', global_prior)
-tf.add_to_collection('logdensities', global_inf.logdens[0])
-
-individ_variation_prior = Normal((VAR_DIM*2+1)*VAR_DIM, sigma=variation, mu=global_inf.output[0])
-
 models = []
-indiv_logdens = []
-indiv_priors = []
-indivs = {}
 
 with tf.variable_scope(tf.get_variable_scope(), dtype=floatX, reuse=tf.AUTO_REUSE):
     for country, data in country_data.items():
-        with tf.variable_scope(country):
-            aux = tf.concat([global_inf.output, variation[tf.newaxis]], axis=-1)
-            individ_variation = DFlow([NVPFlow((VAR_DIM*2+1)*VAR_DIM, 
-                                               name='nvp_{}'.format(i), 
-                                               aux_vars=aux) for i in range(6)], init_sigma=0.01)
-
-            ind = individ_variation.output[0] + global_inf.output[0]
-            indivs[country] = ind
-
-            indiv_logdens.append(individ_variation.logdens)
-            indiv_priors.append(individ_variation_prior.logdens(ind))
-
-        model = VARmodel(data, name='{}_model'.format(country), var_dim=VAR_DIM, mu=ind[tf.newaxis], current_year=current_year)
+        model = STACmodel(data, name='{}_model'.format(country), var_dim=VAR_DIM, current_year=current_year)
         models.append(model)
 
 graph = tf.get_default_graph()
 
-prior = tf.reduce_sum([model.priors for model in models])+ tf.reduce_sum(indiv_priors) + tf.reduce_sum(graph.get_collection('priors'))
+prior = tf.reduce_sum([model.priors for model in models])
 
-logdensity = tf.reduce_sum([model.logdensities for model in models])+ tf.reduce_sum(indiv_logdens) + tf.reduce_sum(graph.get_collection('logdensities'))
+logdensity = tf.reduce_sum([model.logdensities for model in models])
 
 kl = logdensity - prior
 kl /= 36*200*4
@@ -117,7 +78,7 @@ init = tf.global_variables_initializer()
 
 init.run()
 
-writer = tf.summary.FileWriter('/home/nikita/tmp/tblogs/gvar_hier_fullcond')
+writer = tf.summary.FileWriter('/home/nikita/tmp/tblogs/stacvar_nohier')
 
 def validate_year(year):
     cdic = {model.name:model for model in models}
@@ -162,6 +123,6 @@ for year in tqdm(YEARS):
         writer.add_summary(s, global_step=epoch)
     validations.append(validate_year(year))
 
-    saver.save(sess, './save/gvar_hier_fullcond')
-    with open('output_gvar_hier_fullcond.pkl', 'wb') as f:
+    saver.save(sess, './save/stac_nohier')
+    with open('output_stac_nohier.pkl', 'wb') as f:
         pkl.dump(validations,f)

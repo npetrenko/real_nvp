@@ -50,29 +50,30 @@ country_data = {c:d for c,d in zip(ccodes, datas)}
 current_year = tf.placeholder(tf.float32, shape=(), name='current_year')
 tf.summary.scalar('current_year', current_year)
 
-with tf.variable_scope('variation_rate', dtype=floatX):
-    variation_prior = tf.distributions.Exponential(rate=.3)
-    dim_ = (VAR_DIM*2+1)*VAR_DIM
-    variation_mu = tf.get_variable('mu', shape=[dim_], initializer=tf.constant_initializer(math.log(0.3)))
-    variation_presigma = tf.get_variable('presigma', shape=[dim_], initializer=tf.constant_initializer(-3.))
-    variation_d = LogNormal(dim=dim_, mu=variation_mu, sigma=tf.exp(variation_presigma))
-    
-    variation = variation_d.sample()
+def create_variation():
+    with tf.variable_scope('variation_rate', dtype=floatX):
+        variation_prior = tf.distributions.Exponential(rate=4.5)
+        dim_ = (VAR_DIM*2+1)*VAR_DIM
+        variation_mu = tf.get_variable('mu', shape=[dim_], initializer=tf.constant_initializer(math.log(0.3)))
+        variation_presigma = tf.get_variable('presigma', shape=[dim_], initializer=tf.constant_initializer(-3.))
+        variation_d = LogNormal(dim=dim_, mu=variation_mu, sigma=tf.exp(variation_presigma))
+        
+        variation = variation_d.sample()
 
-    pp = tf.cast(tf.reduce_sum(variation_prior.log_prob(tf.cast(variation, tf.float32))), floatX)
-    ld = variation_d.logdens(variation)
-    tf.add_to_collection('logdensities', ld)
-    tf.add_to_collection('priors', pp)
+        pp = tf.cast(tf.reduce_sum(variation_prior.log_prob(tf.cast(variation, tf.float32))), floatX)
+        ld = variation_d.logdens(variation)
+        tf.add_to_collection('logdensities', ld)
+        tf.add_to_collection('priors', pp)
 
-    tf.summary.histogram('variation', variation)
-    tf.summary.scalar('mean_variation', tf.reduce_mean(variation))
+        tf.summary.histogram('variation', variation)
+        tf.summary.scalar('mean_variation', tf.reduce_mean(variation))
+    return variation
 
-global_inf = DFlow([NVPFlow(dim=(VAR_DIM*2+1)*VAR_DIM, name='flow_{}'.format(i), aux_vars=variation[tf.newaxis]) for i in range(6)], init_sigma=0.01)
-global_prior = Normal(None, sigma=1.).logdens(global_inf.output)
+global_inf = DFlow([NVPFlow(dim=(VAR_DIM*2+1)*VAR_DIM, name='flow_{}'.format(i)) for i in range(6)], init_sigma=0.01)
+global_prior = Normal(None, sigma=5.).logdens(global_inf.output)
 tf.add_to_collection('priors', global_prior)
 tf.add_to_collection('logdensities', global_inf.logdens[0])
 
-individ_variation_prior = Normal((VAR_DIM*2+1)*VAR_DIM, sigma=variation, mu=global_inf.output[0])
 
 models = []
 indiv_logdens = []
@@ -82,6 +83,9 @@ indivs = {}
 with tf.variable_scope(tf.get_variable_scope(), dtype=floatX, reuse=tf.AUTO_REUSE):
     for country, data in country_data.items():
         with tf.variable_scope(country):
+            variation = create_variation()
+            individ_variation_prior = Normal((VAR_DIM*2+1)*VAR_DIM, sigma=variation, mu=global_inf.output[0])
+
             aux = tf.concat([global_inf.output, variation[tf.newaxis]], axis=-1)
             individ_variation = DFlow([NVPFlow((VAR_DIM*2+1)*VAR_DIM, 
                                                name='nvp_{}'.format(i), 
@@ -117,7 +121,7 @@ init = tf.global_variables_initializer()
 
 init.run()
 
-writer = tf.summary.FileWriter('/home/nikita/tmp/tblogs/gvar_hier_fullcond')
+writer = tf.summary.FileWriter('/tmp/tfdbg/gpu0')
 
 def validate_year(year):
     cdic = {model.name:model for model in models}
@@ -145,23 +149,15 @@ def validate_year(year):
 
 saver = tf.train.Saver()
 
-for epoch in tqdm(range(300)):
-    fd = {current_year:YEARS[0]}
-    for step in range(100):
-        sess.run(main_op, fd)
-    s, _ = sess.run([summary, main_op], fd)
-    writer.add_summary(s, global_step=epoch)
+options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+run_metadata = tf.RunMetadata()
 
-validations = []
-for year in tqdm(YEARS):
-    fd = {current_year: year}
-    for epoch in range(epoch, epoch+5):
-        for step in range(100):
-            sess.run(main_op, fd)
-        s, _ = sess.run([summary, main_op], fd)
-        writer.add_summary(s, global_step=epoch)
-    validations.append(validate_year(year))
+fd = {current_year:YEARS[0]}
+sess.run(main_op, fd, options=options, run_metadata=run_metadata)
 
-    saver.save(sess, './save/gvar_hier_fullcond')
-    with open('output_gvar_hier_fullcond.pkl', 'wb') as f:
-        pkl.dump(validations,f)
+from tensorflow.python.client import timeline
+# Create the Timeline object, and write it to a json file
+fetched_timeline = timeline.Timeline(run_metadata.step_stats)
+chrome_trace = fetched_timeline.generate_chrome_trace_format()
+with open('timeline_01.json', 'w') as f:
+    f.write(chrome_trace)
