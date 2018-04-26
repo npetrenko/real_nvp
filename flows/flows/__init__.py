@@ -3,3 +3,4 @@ from .basedistr import *
 from . import baselines
 from . import dvae
 from . import models
+from . import parametrized
