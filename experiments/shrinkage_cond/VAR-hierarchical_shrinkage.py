@@ -155,7 +155,7 @@ for epoch in tqdm(range(300)):
 validations = []
 for year in tqdm(YEARS):
     fd = {current_year: year}
-    for epoch in range(epoch, epoch+5):
+    for epoch in range(epoch, epoch+20):
         for step in range(100):
             sess.run(main_op, fd)
         s, _ = sess.run([summary, main_op], fd)

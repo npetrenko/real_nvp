@@ -78,7 +78,7 @@ init = tf.global_variables_initializer()
 
 init.run()
 
-writer = tf.summary.FileWriter('/home/nikita/tmp/tblogs/gvar_nohier')
+writer = tf.summary.FileWriter('/home/nikita/tmp/tblogs/gvar_nohier_slow')
 
 def validate_year(year):
     cdic = {model.name:model for model in models}
@@ -124,5 +124,5 @@ for year in tqdm(YEARS):
     validations.append(validate_year(year))
 
     saver.save(sess, './save/nohier')
-    with open('output_nohier.pkl', 'wb') as f:
+    with open('output_nohier_slow.pkl', 'wb') as f:
         pkl.dump(validations,f)
