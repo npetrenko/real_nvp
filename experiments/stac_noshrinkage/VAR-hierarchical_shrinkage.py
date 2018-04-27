@@ -78,7 +78,7 @@ init = tf.global_variables_initializer()
 
 init.run()
 
-writer = tf.summary.FileWriter('/home/nikita/tmp/tblogs/stacvar_nohier')
+writer = tf.summary.FileWriter('/home/nikita/tmp/tblogs/stacvar_nohier500_20')
 
 def validate_year(year):
     cdic = {model.name:model for model in models}
@@ -106,7 +106,7 @@ def validate_year(year):
 
 saver = tf.train.Saver()
 
-for epoch in tqdm(range(300)):
+for epoch in tqdm(range(500)):
     fd = {current_year:YEARS[0]}
     for step in range(100):
         sess.run(main_op, fd)
@@ -116,7 +116,7 @@ for epoch in tqdm(range(300)):
 validations = []
 for year in tqdm(YEARS):
     fd = {current_year: year}
-    for epoch in range(epoch, epoch+5):
+    for epoch in range(epoch, epoch+20):
         for step in range(100):
             sess.run(main_op, fd)
         s, _ = sess.run([summary, main_op], fd)
