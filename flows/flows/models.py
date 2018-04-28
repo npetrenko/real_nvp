@@ -48,14 +48,14 @@ class VARmodel:
         dim = self.dim
         with tf.variable_scope('rw_priors'):
             s1 = 0.01/4
-            cov_prior = Normal(dim=None, mu=0.5*math.log(1/s1), sigma=3.5, name='cov_prior')
+            cov_prior = Normal(dim=None, mu=0.5*math.log(s1), sigma=3.5, name='cov_prior')
 
             with tf.variable_scope('PWalk_inf'):
                 with tf.variable_scope('flows'):
                     flow_conf = [NVPFlow(dim=self.dim[0]*self.dim[1], name='nvp_{}'.format(i)) for i in range(4)] + \
                         [LinearChol(dim=self.dim[0]*self.dim[1], name='lc')]
                     ldiag = DFlow(flow_conf)
-                    ldiag.output += 0.5*math.log(1/s1)
+                    ldiag.output += 0.5*math.log(s1)
                     ldiag.logdens -= tf.reduce_sum(ldiag.output, axis=-1)[:,tf.newaxis]
                     print('ldiag logdens', ldiag.logdens)
 

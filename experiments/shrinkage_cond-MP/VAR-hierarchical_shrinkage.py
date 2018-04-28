@@ -124,7 +124,7 @@ init = tf.global_variables_initializer()
 
 init.run()
 
-writer = tf.summary.FileWriter('/tmp/trash')
+writer = tf.summary.FileWriter('/home/nikita/tmp/tfdbg/gvars/gvar_corrected')
 
 def validate_year(year):
     cdic = {model.name:model for model in models}
