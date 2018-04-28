@@ -70,8 +70,8 @@ with tf.variable_scope('variation_rate', dtype=floatX):
 global_inf = DFlow([NVPFlow(dim=(VAR_DIM*2+1)*VAR_DIM, name='flow_{}'.format(i), aux_vars=variation[tf.newaxis]) for i in range(6)], init_sigma=0.01)
 
 pmat = np.ones([VAR_DIM, VAR_DIM*2+1], dtype=floatX)
-pmat[:,:VAR_DIM] = 1.
-pmat[:,VAR_DIM:2*VAR_DIM] = 0.1
+pmat[:,:VAR_DIM] = 0.1
+pmat[:,VAR_DIM:2*VAR_DIM] = 1.
 pmat[:,-1] = 1.
 
 global_sigma = tf.constant(pmat.reshape(-1), dtype=floatX)[tf.newaxis]
@@ -124,7 +124,7 @@ init = tf.global_variables_initializer()
 
 init.run()
 
-writer = tf.summary.FileWriter('/home/ubuntu/tmp/tblogs/gvar_hier_fullcond1000-MP')
+writer = tf.summary.FileWriter('/tmp/trash')
 
 def validate_year(year):
     cdic = {model.name:model for model in models}
