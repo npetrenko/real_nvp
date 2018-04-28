@@ -1,6 +1,6 @@
 import tensorflow as tf
 from flows import NormalRW, DFlow, NVPFlow, LogNormal, GVAR, phase,Normal, floatX, MVNormal, MVNormalRW, Linear, LinearChol
-from flows.models import VARmodel, STACmodel
+from flows.models import VARmodel
 import flows
 
 import numpy as np
@@ -54,7 +54,7 @@ models = []
 
 with tf.variable_scope(tf.get_variable_scope(), dtype=floatX, reuse=tf.AUTO_REUSE):
     for country, data in country_data.items():
-        model = STACmodel(data, name='{}_model'.format(country), var_dim=VAR_DIM, current_year=current_year)
+        model = VARmodel(data, name='{}_model'.format(country), var_dim=VAR_DIM, current_year=current_year)
         models.append(model)
 
 graph = tf.get_default_graph()
@@ -78,7 +78,7 @@ init = tf.global_variables_initializer()
 
 init.run()
 
-writer = tf.summary.FileWriter('/home/nikita/tmp/tblogs/stacvar_nohier500_20')
+writer = tf.summary.FileWriter('/home/nikita/tmp/tblogs/gvar_nohier_slow')
 
 def validate_year(year):
     cdic = {model.name:model for model in models}
@@ -106,7 +106,7 @@ def validate_year(year):
 
 saver = tf.train.Saver()
 
-for epoch in tqdm(range(500)):
+for epoch in tqdm(range(300)):
     fd = {current_year:YEARS[0]}
     for step in range(100):
         sess.run(main_op, fd)
@@ -123,6 +123,6 @@ for year in tqdm(YEARS):
         writer.add_summary(s, global_step=epoch)
     validations.append(validate_year(year))
 
-    saver.save(sess, './save/stac_nohier')
-    with open('output_stac_nohier.pkl', 'wb') as f:
+    saver.save(sess, './save/nohier')
+    with open('output_nohier_slow.pkl', 'wb') as f:
         pkl.dump(validations,f)
