@@ -6,8 +6,8 @@ from .flows import *
 from tensorflow.contrib.distributions import WishartCholesky
 
 class VARmodel:
-    def __init__(self, data, name='VARmodel', var_dim=None, mu=None, current_year=None):
-        self.num_samples = 2000
+    def __init__(self, data, name='VARmodel', var_dim=None, mu=None, current_year=None, num_samples=1024):
+        self.num_samples = num_samples
         self.data_raw = data
         self.mu = mu
         self.var_dim = var_dim
@@ -90,14 +90,14 @@ class VARmodel:
 
     def create_observ_dispersion_inference(self, prior_disp):
         print('Prior disp: {}'.format(prior_disp))
-        prior_loc = -0.5*np.log(prior_disp).astype(floatX)
+        prior_loc = np.log(prior_disp/2.).astype(floatX)
 
         with tf.variable_scope('obs_d_inf', reuse=tf.AUTO_REUSE):
-            flow_conf = [NVPFlow(dim=self.var_dim, name='nvp_{}'.format(i)) for i in range(6)] + \
-                [LinearChol(dim=self.var_dim, name='lc')]
+            #flow_conf = [NVPFlow(dim=self.var_dim, name='nvp_{}'.format(i)) for i in range(6)] + \
+            flow_conf = [LinearChol(dim=self.var_dim, name='lc')]
             ldiag = DFlow(flow_conf, init_sigma=0.05, num_samples=self.num_samples)
 
-            ldiag.output -= prior_loc
+            ldiag.output += prior_loc
             ldiag.logdens -= tf.reduce_sum(ldiag.output, axis=-1)
 
         self.obs_d = tf.distributions.Normal(tf.constant(0., dtype=floatX), 
@@ -145,18 +145,20 @@ class VARmodel:
         obs_d = self.obs_d
 
         preds = self.predict(observable_mask, outputs)
-        self.preds = preds[:,:self.var_dim]
+        self.preds = preds[:,:,:self.var_dim]
+        print('preds', self.preds)
         
         with tf.name_scope('loglikelihood'):
             data = tf.transpose(self.data, [1,0,2])
             diffs = preds[:-1,:] - data[1:,:]
             diffs = diffs[:,:,:dim[0]]
 
-            logl = tf.reduce_sum(obs_d.log_prob(diffs), [2])
-            print('logl', logl)
+            logl = tf.reduce_sum(obs_d.log_prob(diffs), [-1])
             logl *= tf.cast(self.observable_mask[1:], floatX)[:,tf.newaxis]
 
+            print('blogl', logl)
             logl = tf.reduce_sum(logl, axis=0)
+            print('logl', logl)
             self.priors.append(logl)
 
 
