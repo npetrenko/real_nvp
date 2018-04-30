@@ -2,6 +2,7 @@ import tensorflow as tf
 from flows import NormalRW, DFlow, NVPFlow, LogNormal, GVAR, phase,Normal, floatX, MVNormal, MVNormalRW, Linear, LinearChol
 from flows.models import VARmodel
 import flows
+from flows import parametrized as fp
 
 import numpy as np
 import pandas as pd
@@ -40,7 +41,7 @@ for i, data in enumerate(datas):
 
 VAR_DIM = 4
 
-YEARS = [x for x in data.columns if x > 2000]
+YEARS = [3000.]#[x for x in data.columns if x > 2000]
 
 country_data = {c:d for c,d in zip(ccodes, datas)}
 
@@ -51,70 +52,73 @@ NUM_SAMPLES=1024
 current_year = tf.placeholder(tf.float32, shape=(), name='current_year')
 tf.summary.scalar('current_year', current_year)
 
-with tf.variable_scope('variation_rate', dtype=floatX):
-    variation_prior = tf.distributions.Exponential(rate=.3)
-    dim_ = (VAR_DIM*2+1)*VAR_DIM
-    variation_mu = tf.get_variable('mu', shape=[dim_], initializer=tf.constant_initializer(math.log(0.3)))
-    variation_presigma = tf.get_variable('presigma', shape=[dim_], initializer=tf.constant_initializer(-3.))
-    variation_d = LogNormal(shape=[NUM_SAMPLES, dim_], mu=variation_mu[tf.newaxis], 
-                            sigma=tf.exp(variation_presigma)[tf.newaxis])
+#with tf.variable_scope('variation_rate', dtype=floatX):
+    #variation_prior = tf.distributions.Exponential(rate=.3)
+    #dim_ = (VAR_DIM*2+1)*VAR_DIM
+    #variation_d = fp.pLogNormal(shape=[NUM_SAMPLES, dim_], mu=-3.)
     
-    variation = variation_d.sample()
+    #variation = variation_d.sample()
 
-    pp = tf.cast(tf.reduce_sum(variation_prior.log_prob(tf.cast(variation, tf.float32)), axis=-1), floatX)
-    ld = tf.reduce_sum(variation_d.logdens(variation, reduce=False), axis=-1)
-    tf.add_to_collection('logdensities', ld)
-    tf.add_to_collection('priors', pp)
+    #pp = tf.cast(tf.reduce_sum(variation_prior.log_prob(tf.cast(variation, tf.float32)), axis=-1), floatX)
+    #tf.add_to_collection('priors', pp)
+#
+    #tf.summary.histogram('variation', variation)
+    #tf.summary.scalar('mean_variation', tf.reduce_mean(variation))
 
-    tf.summary.histogram('variation', variation)
-    tf.summary.scalar('mean_variation', tf.reduce_mean(variation))
+#with tf.variable_scope('global_inf'):
+    #global_inf = DFlow([NVPFlow(dim=(VAR_DIM*2+1)*VAR_DIM, name='flow_{}'.format(i), aux_vars=variation) for i in range(6)], 
+                        #init_sigma=0.01, num_samples=NUM_SAMPLES)
 
-global_inf = DFlow([NVPFlow(dim=(VAR_DIM*2+1)*VAR_DIM, name='flow_{}'.format(i), aux_vars=variation) for i in range(6)], 
-                    init_sigma=0.01, num_samples=NUM_SAMPLES)
+    #with tf.variable_scope('prior'):
+        #pmat = np.ones([VAR_DIM, VAR_DIM*2+1], dtype=floatX)
+        #pmat[:,:VAR_DIM] = 0.1
+        #pmat[:,VAR_DIM:2*VAR_DIM] = 1.
+        #pmat[:,-1] = 1.
 
-pmat = np.ones([VAR_DIM, VAR_DIM*2+1], dtype=floatX)
-pmat[:,:VAR_DIM] = 0.1
-pmat[:,VAR_DIM:2*VAR_DIM] = 1.
-pmat[:,-1] = 1.
+        #global_sigma = tf.constant(pmat.reshape(-1), dtype=floatX)[tf.newaxis]
+        #global_prior = Normal(None, sigma=global_sigma).logdens(global_inf.output, reduce=False)
+        #global_prior = tf.reduce_sum(global_prior, axis=-1)
+    #tf.add_to_collection('priors', global_prior)
+    #tf.add_to_collection('logdensities', global_inf.logdens)
 
-global_sigma = tf.constant(pmat.reshape(-1), dtype=floatX)[tf.newaxis]
-global_prior = Normal(None, sigma=global_sigma).logdens(global_inf.output, reduce=False)
-global_prior = tf.reduce_sum(global_prior, axis=-1)
-tf.add_to_collection('priors', global_prior)
-tf.add_to_collection('logdensities', global_inf.logdens)
+#print('Global output: ', global_inf.output)
+#print('Global logdens: ', global_inf.logdens)
 
-individ_variation_prior = Normal(dim=None, sigma=variation, mu=global_inf.output)
+#individ_variation_prior = Normal(shape=None, sigma=variation, mu=global_inf.output, name='indiv_variation_prior')
 
 models = []
 indivs = {}
 
 with tf.variable_scope(tf.get_variable_scope(), dtype=floatX, reuse=tf.AUTO_REUSE):
     for country, data in country_data.items():
-        with tf.variable_scope(country):
-            aux = tf.concat([global_inf.output, variation], axis=-1)
-            individ_variation = DFlow([NVPFlow((VAR_DIM*2+1)*VAR_DIM, 
-                                               name='nvp_{}'.format(i), 
-                                               aux_vars=aux) for i in range(6)], init_sigma=0.01, num_samples=NUM_SAMPLES)
+        #with tf.variable_scope(country):
+            #with tf.variable_scope('individ_variation'):
+                #aux = tf.concat([global_inf.output, variation], axis=-1)
+                #individ_variation = DFlow([NVPFlow((VAR_DIM*2+1)*VAR_DIM, 
+                                                   #name='nvp_{}'.format(i), 
+                                                   #aux_vars=aux) for i in range(6)], init_sigma=0.01, num_samples=NUM_SAMPLES)
 
-            ind = individ_variation.output + global_inf.output
-            indivs[country] = ind
+                #ind = individ_variation.output + global_inf.output
+            #indivs[country] = ind
 
-            tf.add_to_collection('logdensities', individ_variation.logdens)
-            tf.add_to_collection('priors', tf.reduce_sum(individ_variation_prior.logdens(ind, reduce=False), axis=-1))
+            #tf.add_to_collection('logdensities', individ_variation.logdens)
+            #tf.add_to_collection('priors', tf.reduce_sum(individ_variation_prior.logdens(ind, reduce=False), axis=-1))
 
-        model = VARmodel(data, name='{}_model'.format(country), var_dim=VAR_DIM, mu=ind, current_year=current_year, num_samples=NUM_SAMPLES)
+        #raise mu=ind[tf.newaxis]
+        model = VARmodel(data, name='{}_model'.format(country), var_dim=VAR_DIM, current_year=current_year, num_samples=NUM_SAMPLES)
         models.append(model)
 
 graph = tf.get_default_graph()
 
-fp = tf.reduce_sum([model.priors for model in models], axis=[0,1])
-sp = tf.reduce_sum(graph.get_collection('priors'), axis=0)
+fp = tf.reduce_sum(sum([model.priors for model in models], []), axis=0)
+sp = 0.#tf.reduce_sum(graph.get_collection('priors'), axis=0)
 prior = fp + sp
 
-logdensity = tf.reduce_sum([model.logdensities for model in models], axis=[0,1]) + tf.add_n(graph.get_collection('logdensities'))
+logdensity = tf.reduce_sum(sum([model.logdensities for model in models],[]), axis=0)# + tf.add_n(graph.get_collection('logdensities'))
+print('logdensity ', logdensity)
 
 kl = logdensity - prior
-print(kl)
+print('KL: ', kl)
 kl = tf.reduce_mean(kl)
 kl /= 36*200*4
 
@@ -142,7 +146,7 @@ init = tf.global_variables_initializer()
 
 sess.run(init)
 
-writer = tf.summary.FileWriter('/tmp/tfdbg/gvar_cond4_cont_corrected_prior_fix')
+writer = tf.summary.FileWriter('/tmp/tfdbg/gvar_cond4_cont_corrected_prior_fix_disconnected3')
 
 def validate_year(year):
     cdic = {model.name:model for model in models}

@@ -48,7 +48,7 @@ class VARmodel:
         dim = self.dim
         with tf.variable_scope('rw_priors'):
             s1 = 0.01/4
-            cov_prior = Normal(dim=None, mu=0.5*math.log(s1), sigma=3.5, name='cov_prior')
+            cov_prior = Normal(shape=None, mu=0.5*math.log(s1), sigma=3.5, name='cov_prior')
 
             with tf.variable_scope('PWalk_inf'):
                 with tf.variable_scope('flows'):
