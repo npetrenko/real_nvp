@@ -48,18 +48,19 @@ class VARmodel:
         dim = self.dim
         with tf.variable_scope('rw_priors'):
             s1 = 0.01/4
-            cov_prior = Normal(shape=None, mu=0.5*math.log(s1), sigma=3.5, name='cov_prior')
+            cov_prior = LogNormal(shape=None, mu=math.log(s1), sigma=.6, name='cov_prior')
 
             with tf.variable_scope('PWalk_inf'):
                 with tf.variable_scope('flows'):
-                    flow_conf = [NVPFlow(dim=self.dim[0]*self.dim[1], name='nvp_{}'.format(i)) for i in range(4)] + \
-                        [LinearChol(dim=self.dim[0]*self.dim[1], name='lc')]
-                    ldiag = DFlow(flow_conf, num_samples=self.num_samples)
-                    ldiag.output += 0.5*math.log(s1)
+                    flow_conf = [LinearChol(dim=self.dim[0]*self.dim[1], name='lc')]
+                    ldiag = DFlow(flow_conf, num_samples=self.num_samples, init_sigma=0.01)
+                    ldiag.output += math.log(s1)
                     ldiag.logdens -= tf.reduce_sum(ldiag.output, axis=-1)
+                    diag = tf.exp(ldiag.output)
                     print('ldiag logdens', ldiag.logdens)
 
                     self.logdensities.append(ldiag.logdens)
+                    self.priors.append(tf.reduce_sum(cov_prior.logdens(diag, reduce=False), axis=1))
                 
                 if self.mu is None:
                     sigma0 = None
@@ -68,22 +69,42 @@ class VARmodel:
                     
                 PWalk = MVNormalRW(dim=self.dim[0]*self.dim[1], 
                                    sigma0=3., 
-                                   diag=tf.exp(ldiag.output), name='OrdWalk')
-                self.priors.append(tf.reduce_sum(cov_prior.logdens(ldiag.output, reduce=False), axis=1))
+                                   diag=diag, name='OrdWalk')
                 self.PWalk = PWalk
-                tf.summary.scalar('s1_ord', tf.reduce_mean(tf.sqrt(PWalk.diag)))
+                tf.summary.scalar('s1_ord', tf.reduce_mean(PWalk.diag))
 
     def create_walk_inference(self, mu=None):
         dim = self.dim
+
+        centralize = mu is not None
         gvar = GVAR(dim=dim[0]*dim[1], len=self.NUM_STEPS, name='coef_rw_inference', 
-                    mu=mu, num_samples=self.num_samples)
+                    num_samples=self.num_samples)
         outputs = gvar.sample()
 
         self.logdensities.append(gvar.logdens)
-        with tf.name_scope('PWald_prior'):
-            pwld = self.PWalk.logdens(outputs)
-            print('pwld', pwld)
-            self.priors.append(tf.reduce_sum(pwld, axis=[1]))
+        with tf.name_scope('PWalk_prior'):
+            if mu is None:
+                pwld = self.PWalk.logdens(outputs)
+            else:
+                init = tf.zeros_like(outputs[:,0:1])
+                target = tf.concat([init, outputs[:,1:]], axis=1)
+                diffs = outputs - target
+                outputs = tf.identity(outputs, name='premu')
+
+                diffs = tf.cast(diffs, tf.float64)
+                diag = tf.cast(self.PWalk.diag, tf.float64)
+
+                #pwld = Normal(shape=None, sigma=diag[:,tf.newaxis], name='walk_distr').logdens(diffs, reduce=False)
+                diag = diag[:,tf.newaxis]
+                import math
+                pwld = -tf.square(diffs)/(2*tf.square(diag)) - 0.5*math.log(2*math.pi) - tf.log(diag)
+                pwld = tf.identity(pwld, name='pwld_prereduce')
+                pwld = tf.reduce_sum(pwld, axis=[-1])
+                pwld = tf.cast(pwld, floatX)
+
+                outputs += mu
+
+            self.priors.append(tf.reduce_sum(pwld, axis=[1], name='pwalk_prior_ld'))
         self.outputs = outputs
 
         return outputs
@@ -93,21 +114,28 @@ class VARmodel:
         prior_loc = np.log(prior_disp/2.).astype(floatX)
 
         with tf.variable_scope('obs_d_inf', reuse=tf.AUTO_REUSE):
-            #flow_conf = [NVPFlow(dim=self.var_dim, name='nvp_{}'.format(i)) for i in range(6)] + \
             flow_conf = [LinearChol(dim=self.var_dim, name='lc')]
-            ldiag = DFlow(flow_conf, init_sigma=0.05, num_samples=self.num_samples)
+            ldiag = DFlow(flow_conf, init_sigma=0.01, num_samples=self.num_samples)
 
             ldiag.output += prior_loc
             ldiag.logdens -= tf.reduce_sum(ldiag.output, axis=-1)
+            diag = tf.exp(ldiag.output)
 
-        self.obs_d = tf.distributions.Normal(tf.constant(0., dtype=floatX), 
-                                             scale=tf.exp(ldiag.output), name='obs_d_prior')
+        self.obs_d = Normal(shape=[self.num_samples, self.var_dim], 
+                            sigma=tf.exp(ldiag.output), name='obs_d_prior')
         
         with tf.name_scope('obsrv_prior'):
-            pr = tf.reduce_sum(tf.distributions.Normal(loc=prior_loc[np.newaxis], 
-                                                       scale=tf.constant(3., dtype=floatX)).log_prob(ldiag.output), 
+            pr = tf.reduce_sum(LogNormal(shape=None, mu=prior_loc[np.newaxis], 
+                                       sigma=tf.constant(3., dtype=floatX)).logdens(diag, reduce=False), 
                                axis=-1)
-        tf.summary.scalar('mean_ods', tf.reduce_mean(tf.exp(ldiag.output)))
+        tf.summary.scalar('mean_ods', tf.reduce_mean(diag))
+        
+        sigmas = tf.reduce_mean(self.obs_d.sigma, axis=0)
+        current_data = self.data[:,:self.OBSERV_STEPS]
+        std = tf.nn.moments(current_data[0,1:,:self.var_dim] - current_data[0,:-1,:self.var_dim], axes=[0])[1]
+        rsquareds = 1 - sigmas/tf.sqrt(std)
+        self.create_summary(tf.summary.scalar, 'rsquared_post_mean', tf.reduce_mean(rsquareds, axis=0))
+
         self.logdensities.append(ldiag.logdens)
         self.priors.append(pr)
 
@@ -152,9 +180,21 @@ class VARmodel:
             data = tf.transpose(self.data, [1,0,2])
             diffs = preds[:-1,:] - data[1:,:]
             diffs = diffs[:,:,:dim[0]]
+            print(diffs)
 
-            logl = tf.reduce_sum(obs_d.log_prob(diffs), [-1])
+            def create_summary(diffs, name):
+                sigmas = tf.reduce_mean(tf.nn.moments(diffs[:self.OBSERV_STEPS-1], axes=[0])[1], axis=0)
+                current_data = self.data[:,:self.OBSERV_STEPS]
+                std = tf.nn.moments(current_data[0,1:,:self.var_dim] - current_data[0,:-1,:self.var_dim], axes=[0])[1]
+                rsquareds = 1 - tf.sqrt(sigmas/std)
+                self.create_summary(tf.summary.scalar, name, tf.reduce_mean(rsquareds, axis=0))
+
+            create_summary(diffs, 'rsquared_observed')
+            create_summary(tf.reduce_mean(diffs, axis=1)[:,tf.newaxis], 'rsquared_observed_pp')
+
+            logl = tf.reduce_sum(obs_d.logdens(diffs, reduce=False), [-1])
             logl *= tf.cast(self.observable_mask[1:], floatX)[:,tf.newaxis]
+            logl = logl[:self.OBSERV_STEPS-1]
 
             print('blogl', logl)
             logl = tf.reduce_sum(logl, axis=0)
@@ -218,8 +258,7 @@ class STACmodel:
     def create_observ_dispersion_inference(self, prior_disp):
         print('Prior disp: {}'.format(prior_disp))
         with tf.variable_scope('obs_d_inf', reuse=tf.AUTO_REUSE):
-            flow_conf = [NVPFlow(dim=self.var_dim, name='nvp_{}'.format(i)) for i in range(6)] + \
-                [LinearChol(dim=self.var_dim, name='lc')]
+            flow_conf = [LinearChol(dim=self.var_dim, name='lc')]
             ldiag = DFlow(flow_conf, init_sigma=0.05)
 
             ldiag.output -= 0.5*np.log(prior_disp).astype(floatX)

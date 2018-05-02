@@ -23,17 +23,26 @@ class Normal(Distribution):
 
     def logdens(self, x, reduce=True):
         with tf.variable_scope(self.scope):
-            s2 = tf.cast(tf.square(self.sigma), floatX)
+            with tf.name_scope('logdens'):
+                if isinstance(x,tf.Tensor):
+                    inp_dtype = x.dtype
+                else:
+                    inp_dtype = floatX
 
-            denum = tf.cast(- 0.5 * tf.log(2*np.pi*s2), floatX)
-            tmp = -tf.square(x-self.mu)/(2*s2) + denum
-            if reduce:
-                tmp = tf.reduce_sum(tmp)
-            return tmp
+                print(inp_dtype)
+                s2 = tf.cast(tf.square(self.sigma), inp_dtype)
+
+                denum = tf.cast(- 0.5 * tf.log(2*np.pi*s2), inp_dtype)
+                tmp = -tf.square(x-self.mu)/(2*s2) + denum
+                if reduce:
+                    tmp = tf.reduce_sum(tmp)
+                tmp = tf.identity(tmp, name='logdens')
+                return tmp
 
     def sample(self):
         with tf.variable_scope(self.scope):
-            return tf.random_normal(self.shape, self.mu, self.sigma, dtype=floatX)
+            with tf.name_scope('sample'):
+                return tf.random_normal(self.shape, self.mu, self.sigma, dtype=floatX)
 
 class NormalRW(Normal):
     def __init__(self, dim, mu=0, sigma=1, mu0=0, sigma0=1, name='NormalRW'):
@@ -45,33 +54,33 @@ class NormalRW(Normal):
 
     def logdens(self, x, reduce=True):
         with tf.variable_scope(self.scope):
-            assert len(x.shape) >= 2
-            norms = x[:,1:] - x[:,:-1]
-            if reduce==True:
-                if self.init_distr.mu is None:
-                    init_logdens = 0.
-                    if self.init_distr.sigma is not None:
-                        raise ValueError
+            with tf.name_scope('logdens'):
+                assert len(x.shape) >= 2
+                norms = x[:,1:] - x[:,:-1]
+                if reduce==True:
+                    if self.init_distr.mu is None:
+                        init_logdens = 0.
+                        if self.init_distr.sigma is not None:
+                            raise ValueError
+                    else:
+                        init_logdens = self.init_distr.logdens(x[:,0], reduce)
+                        if self.init_distr.sigma is None:
+                            raise ValueError
+                    ll = super().logdens(norms, reduce) + init_logdens
+                    ll = tf.identity(ll, name='logdens')
+                    return ll
                 else:
-                    init_logdens = self.init_distr.logdens(x[:,0], reduce)
-                    if self.init_distr.sigma is None:
-                        raise ValueError
-                ll = super().logdens(norms, reduce) + init_logdens
-                return ll
-            else:
-                if self.init_distr.mu is not None:
-                    print('Init_distr.mu is not None')
-                    init_dens = tf.reduce_sum(self.init_distr.logdens(x[:,0], reduce)[:,tf.newaxis], axis=-1)
-                else:
-                    init_dens = tf.constant([[0.]], dtype=floatX)
-                    if self.init_distr.sigma is not None:
-                        raise ValueError
-                cont_dens = tf.reduce_sum(super().logdens(norms, reduce), axis=-1)
-                dens = tf.concat([init_dens, cont_dens], axis=1)
-                return dens
-    
-    def sample(self):
-        raise NotImplementedError
+                    if self.init_distr.mu is not None:
+                        print('Init_distr.mu is not None')
+                        init_dens = tf.reduce_sum(self.init_distr.logdens(x[:,0], reduce)[:,tf.newaxis], axis=-1)
+                    else:
+                        init_dens = tf.constant([[0.]], dtype=floatX)
+                        if self.init_distr.sigma is not None:
+                            raise ValueError
+                    cont_dens = tf.reduce_sum(super().logdens(norms, reduce), axis=-1)
+                    dens = tf.concat([init_dens, cont_dens], axis=1)
+                    dens = tf.identity(dens, 'logdens')
+                    return dens
 
 class MVNormal(Distribution):
     def __init__(self, dim, sigma=1., name='MVNormal', lowerd=None, ldiag=None):
@@ -99,24 +108,26 @@ class MVNormal(Distribution):
 
     def logdens(self, x, reduce=True):
         with tf.variable_scope(self.scope):
-            #reduction happens only on the last dimension
-            x_shape = tf.shape(x)
-            x = tf.reshape(x, [-1, x.shape[-1]])
-            resid_shape = x_shape[:-1]
+            with tf.name_scope('logdens'):
+                #reduction happens only on the last dimension
+                x_shape = tf.shape(x)
+                x = tf.reshape(x, [-1, x.shape[-1]])
+                resid_shape = x_shape[:-1]
 
-            norms = tf.reduce_sum(tf.square(tf.matmul(x, self.fsigma)), axis=-1)
-            print(norms)
-            tmp = -0.5*norms - (self.dim/2)*np.log(2*np.pi) - 0.5*(self.logdet + tf.cast(tf.shape(x)[-1], floatX)*math.log(2*math.pi))
-            if reduce:
-                return tf.reduce_sum(tmp)
-            else:
-                return tf.reshape(tmp, resid_shape)
+                norms = tf.reduce_sum(tf.square(tf.matmul(x, self.fsigma)), axis=-1)
+                print(norms)
+                tmp = -0.5*norms - (self.dim/2)*np.log(2*np.pi) - 0.5*(self.logdet + tf.cast(tf.shape(x)[-1], floatX)*math.log(2*math.pi))
+                if reduce:
+                    return tf.reduce_sum(tmp, name='logdens')
+                else:
+                    return tf.reshape(tmp, resid_shape, name='logdens')
     def sample(self):
         with tf.variable_scope(self.scope):
-            # x^T.FS.FS^T.x => EPS = i(FS).i(FS.T)
-            Ifsigma = tf.linalg.inv(self.fsigma)
-            base = tf.random_normal([self.dim,1], dtype=floatX)
-            return tf.matmul(Ifsigma, base)[:,0]
+            with tf.name_scope('sample'):
+                # x^T.FS.FS^T.x => EPS = i(FS).i(FS.T)
+                Ifsigma = tf.linalg.inv(self.fsigma)
+                base = tf.random_normal([self.dim,1], dtype=floatX)
+                return tf.identity(tf.matmul(Ifsigma, base)[:,0], name='sample')
 
 class MVNormalRW(Distribution):
     def __init__(self, dim, sigma0=1., name='MVNormalRW', diag=None):
@@ -138,12 +149,8 @@ class MVNormalRW(Distribution):
                 init_ll = tf.reduce_sum(self.init_distr.logdens(x[:,0], reduce=False), axis=-1)
                 cont_ll = tf.reduce_sum(Normal(shape=None, mu=tf.constant(0., dtype=floatX), 
                                                sigma=self.diag[:,tf.newaxis,:]).logdens(norms, reduce=False), axis=-1)
-                ll = tf.concat([init_ll[:,tf.newaxis], cont_ll], axis=1)
-                    
+                ll = tf.concat([init_ll[:,tf.newaxis], cont_ll], axis=1, name='logdens')    
             return ll
-    
-    def sample(self):
-        raise NotImplementedError
 
 class LogNormal(Distribution):
     def __init__(self, shape, mu=0., sigma=1., name='LogNormal'):
@@ -153,18 +160,21 @@ class LogNormal(Distribution):
 
     def logdens(self, x, reduce=True):
         with tf.variable_scope(self.scope):
-            logits = tf.log(x)
-            s2 = tf.cast(tf.square(self.sigma), floatX)
+            with tf.name_scope('logdens'):
+                logits = tf.log(x)
+                s2 = tf.cast(tf.square(self.sigma), floatX)
 
-            denum = tf.cast(- 0.5 * tf.log(2*np.pi*s2), floatX)
-            tmp = -tf.square(logits-self.mu)/(2.*s2) + denum - logits
-            if reduce:
-                tmp = tf.reduce_sum(tmp)
-            return tmp
+                denum = tf.cast(- 0.5 * tf.log(2*np.pi*s2), floatX)
+                tmp = -tf.square(logits-self.mu)/(2.*s2) + denum - logits
+                if reduce:
+                    tmp = tf.reduce_sum(tmp)
+                tmp = tf.identity(tmp, name='logdens')
+                return tmp
 
     def sample(self):
         with tf.variable_scope(self.scope):
-            return tf.exp(tf.random_normal(self.shape, self.mu, self.sigma, dtype=floatX))
+            with tf.name_scope('sample'):
+                return tf.identity(tf.exp(tf.random_normal(self.shape, self.mu, self.sigma, dtype=floatX)), name='sample')
 
 
 class Gumbel:
@@ -192,54 +202,50 @@ class Gumbel:
 
 
 class GVAR(Distribution):
-    def __init__(self, dim, len, name=None, mu=None, num_samples=1):
+    def __init__(self, dim, len, name=None, num_samples=1, centralize=False):
         super().__init__(shape=None, name=name)
         self.dim = dim
         self.len = len
         self.num_samples = num_samples
         self.logdens = None #property to hold logdensity of the last sample
-        self.mu = mu
+        self.centralize = centralize
 
     def sample(self):
         from flows import LinearChol
         with tf.variable_scope(self.scope, reuse=tf.AUTO_REUSE):
+            with tf.name_scope('sample'):
+                init = Normal([self.len, self.num_samples, self.dim], sigma=0.001)
+                out_sample = init.sample() 
 
-            init = Normal([self.len, self.num_samples, self.dim], sigma=0.01)
-            out_sample = init.sample() 
+                with tf.variable_scope('VAR', dtype=floatX, initializer=tf.random_normal_initializer(stddev=0.001)):
+                    precholeskis = tf.get_variable('precholeskis', shape=[self.len,self.dim,self.dim])
+                    precholeskis_diag = tf.get_variable('precholeskis_diag', shape=[self.len,self.dim])
 
-            with tf.variable_scope('VAR', dtype=floatX, initializer=tf.random_normal_initializer(stddev=0.001)):
-                precholeskis = tf.get_variable('precholeskis', shape=[self.len,self.dim,self.dim])
-                precholeskis_diag = tf.get_variable('precholeskis_diag', shape=[self.len,self.dim])
+                    aux_vars = tf.get_variable('aux_vars', shape=[self.len, self.dim, self.dim])
 
-                aux_init = tf.diag(tf.ones(self.dim, dtype=floatX))[tf.newaxis]
-                aux_init = tf.tile(aux_init, [self.len, 1, 1])
-                aux_vars = tf.get_variable('aux_vars', initializer=aux_init)
+                    choleskis = precholeskis - tf.matrix_band_part(precholeskis, 0, -1)
 
-                choleskis = precholeskis - tf.matrix_band_part(precholeskis, 0, -1)
+                    def step(prev, x):
+                        nv = x[0]
+                        prev = prev
+                        chol = x[1]
+                        aux_v = x[2]
+                        return tf.matmul(nv, chol) + tf.matmul(prev, aux_v) 
+                        
+                    outputs = tf.scan(step, elems=[out_sample, choleskis, aux_vars], initializer=tf.zeros([self.num_samples, self.dim], dtype=floatX))
 
-                def step(prev, x):
-                    nv = x[0]
-                    prev = prev
-                    chol = x[1]
-                    aux_v = x[2]
-                    return tf.matmul(nv, chol) + tf.matmul(prev, aux_v)
+                    addmu = tf.get_variable('mu', shape=[self.len,1,self.dim])
+
+                    outputs += tf.exp(precholeskis_diag)[:,tf.newaxis,:]*out_sample
+
+                    outputs += addmu
+
+                    outputs = tf.cumsum(outputs)
+
+                    outputs = tf.transpose(outputs, [1,0,2])
                     
-                outputs = tf.scan(step, elems=[out_sample, choleskis, aux_vars], initializer=tf.zeros([self.num_samples, self.dim], dtype=floatX))
+                    with tf.name_scope('logdens'):
+                        self.logdens = -tf.reduce_sum(precholeskis_diag) + tf.reduce_sum(init.logdens(out_sample, reduce=False), [0,2])
 
-                outputs += tf.exp(precholeskis_diag)[:,tf.newaxis,:]*out_sample
-
-                addmu = tf.get_variable('mu', initializer=tf.zeros([self.len,1,self.dim], dtype=floatX))
-                addmu = tf.cumsum(addmu)
-                #outputs = tf.cumsum(outputs)
-
-                if self.mu is not None:
-                    addmu -= tf.reduce_mean(addmu, axis=0)[tf.newaxis]
-                    addmu += self.mu
-
-                outputs += addmu
-                outputs = tf.transpose(outputs, [1,0,2])
-                
-                with tf.name_scope('logdens'):
-                    self.logdens = -tf.reduce_sum(precholeskis_diag) + tf.reduce_sum(init.logdens(out_sample, reduce=False), [0,2])
-                    
-                return outputs
+                    outputs = tf.identity(outputs, name='sample')
+                    return outputs
