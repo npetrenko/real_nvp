@@ -34,8 +34,14 @@ class Normal(Distribution):
 
                 denum = tf.cast(- 0.5 * tf.log(2*np.pi*s2), inp_dtype)
                 tmp = -tf.square(x-self.mu)/(2*s2) + denum
-                if reduce:
-                    tmp = tf.reduce_sum(tmp)
+                if reduce != False:
+                    if isinstance(reduce,list):
+                        tmp = tf.reduce_sum(tmp, axis=reduce)
+                    else:
+                        if reduce != True:
+                            print('Such type of reduce {} is not allowed'.format(str(reduce)))
+                            raise ValueError
+                        tmp = tf.reduce_sum(tmp)
                 tmp = tf.identity(tmp, name='logdens')
                 return tmp
 
@@ -166,8 +172,13 @@ class LogNormal(Distribution):
 
                 denum = tf.cast(- 0.5 * tf.log(2*np.pi*s2), floatX)
                 tmp = -tf.square(logits-self.mu)/(2.*s2) + denum - logits
-                if reduce:
-                    tmp = tf.reduce_sum(tmp)
+                if reduce != False:
+                    if isinstance(reduce,list):
+                        tmp = tf.reduce_sum(tmp, reduce)
+                    else:
+                        if reduce != True:
+                            raise ValueError
+                        tmp = tf.reduce_sum(tmp)
                 tmp = tf.identity(tmp, name='logdens')
                 return tmp
 
@@ -218,10 +229,12 @@ class GVAR(Distribution):
                 out_sample = init.sample() 
 
                 with tf.variable_scope('VAR', dtype=floatX, initializer=tf.random_normal_initializer(stddev=0.001)):
-                    precholeskis = tf.get_variable('precholeskis', shape=[self.len,self.dim,self.dim])
-                    precholeskis_diag = tf.get_variable('precholeskis_diag', shape=[self.len,self.dim])
+                    trainable = True
 
-                    aux_vars = tf.get_variable('aux_vars', shape=[self.len, self.dim, self.dim])
+                    precholeskis = tf.get_variable('precholeskis', shape=[self.len,self.dim,self.dim], trainable=trainable)
+                    precholeskis_diag = tf.get_variable('precholeskis_diag', shape=[self.len,self.dim], trainable=trainable)
+                    aux_vars = tf.get_variable('aux_vars', shape=[self.len, self.dim, self.dim], trainable=trainable)
+                    addmu = tf.get_variable('mu', shape=[self.len,1,self.dim], trainable=trainable)
 
                     choleskis = precholeskis - tf.matrix_band_part(precholeskis, 0, -1)
 
@@ -234,8 +247,6 @@ class GVAR(Distribution):
                         
                     outputs = tf.scan(step, elems=[out_sample, choleskis, aux_vars], initializer=tf.zeros([self.num_samples, self.dim], dtype=floatX))
 
-                    addmu = tf.get_variable('mu', shape=[self.len,1,self.dim])
-
                     outputs += tf.exp(precholeskis_diag)[:,tf.newaxis,:]*out_sample
 
                     outputs += addmu
@@ -245,7 +256,7 @@ class GVAR(Distribution):
                     outputs = tf.transpose(outputs, [1,0,2])
                     
                     with tf.name_scope('logdens'):
-                        self.logdens = -tf.reduce_sum(precholeskis_diag) + tf.reduce_sum(init.logdens(out_sample, reduce=False), [0,2])
+                        self.logdens = -tf.reduce_sum(precholeskis_diag) + init.logdens(out_sample, reduce=[0,2])
 
                     outputs = tf.identity(outputs, name='sample')
                     return outputs
