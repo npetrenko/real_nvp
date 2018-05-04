@@ -55,7 +55,7 @@ tf.summary.scalar('current_year', current_year)
 with tf.variable_scope('variation_rate', dtype=floatX):
     variation_prior = tf.distributions.Exponential(rate=.3)
     dim_ = (VAR_DIM*2+1)*VAR_DIM
-    variation_d = fp.pLogNormal(shape=[NUM_SAMPLES, dim_], mu=-3.)
+    variation_d = fp.pLogNormal(shape=[NUM_SAMPLES, dim_], mu=math.log(0.2), sigma=-3.)
     
     variation = variation_d.sample()
 
@@ -66,7 +66,7 @@ with tf.variable_scope('variation_rate', dtype=floatX):
     tf.summary.scalar('mean_variation', tf.reduce_mean(variation))
 
 with tf.variable_scope('global_inf'):
-    global_inf = DFlow([NVPFlow(dim=(VAR_DIM*2+1)*VAR_DIM, name='flow_{}'.format(i), aux_vars=variation) for i in range(6)], 
+    global_inf = DFlow([NVPFlow(dim=(VAR_DIM*2+1)*VAR_DIM, name='flow_{}'.format(i), aux_vars=variation) for i in range(8)], 
                         init_sigma=0.01, num_samples=NUM_SAMPLES)
 
     with tf.variable_scope('prior'):
@@ -76,8 +76,7 @@ with tf.variable_scope('global_inf'):
         pmat[:,-1] = 1.
 
         global_sigma = tf.constant(pmat.reshape(-1), dtype=floatX)[tf.newaxis]
-        global_prior = Normal(None, sigma=global_sigma).logdens(global_inf.output, reduce=False)
-        global_prior = tf.reduce_sum(global_prior, axis=-1)
+        global_prior = Normal(None, sigma=global_sigma).logdens(global_inf.output, reduce=[-1])
     tf.add_to_collection('priors', global_prior)
     tf.add_to_collection('logdensities', global_inf.logdens)
 
@@ -96,13 +95,13 @@ with tf.variable_scope(tf.get_variable_scope(), dtype=floatX, reuse=tf.AUTO_REUS
                 aux = tf.concat([global_inf.output, variation], axis=-1)
                 individ_variation = DFlow([NVPFlow((VAR_DIM*2+1)*VAR_DIM, 
                                                    name='nvp_{}'.format(i), 
-                                                   aux_vars=aux) for i in range(6)], init_sigma=0.01, num_samples=NUM_SAMPLES)
+                                                   aux_vars=aux) for i in range(8)], init_sigma=0.01, num_samples=NUM_SAMPLES)
 
                 ind = individ_variation.output + global_inf.output
             indivs[country] = ind
 
             tf.add_to_collection('logdensities', individ_variation.logdens)
-            tf.add_to_collection('priors', tf.reduce_sum(individ_variation_prior.logdens(ind, reduce=False), axis=-1))
+            tf.add_to_collection('priors', individ_variation_prior.logdens(ind, reduce=[-1]))
                 
         model = VARmodel(data, name='{}_model'.format(country), mu=ind[:, tf.newaxis], var_dim=VAR_DIM, current_year=current_year, num_samples=NUM_SAMPLES)
         models.append(model)
@@ -130,13 +129,14 @@ kls = tf.summary.scalar('KLd', kl)
 summary = tf.summary.merge_all()
 
 saver = tf.train.Saver()
-with tf.variable_scope('build_upd') as upd_scope:
-    vs = tf.trainable_variables()
-    grads = tf.gradients(kl, vs)
-    upd = zip(grads, vs)
-    gnans = [tf.check_numerics(x, 'nan in {}'.format(x.op.name)) for x in grads if x is not None]
-    with tf.control_dependencies(gnans):
-        main_op = tf.train.AdamOptimizer(0.002).apply_gradients(upd)
+#with tf.variable_scope('build_upd') as upd_scope:
+    #vs = tf.trainable_variables()
+    #grads = tf.gradients(kl, vs)
+    #upd = zip(grads, vs)
+    #gnans = [tf.check_numerics(x, 'nan in {}'.format(x.op.name)) for x in grads if x is not None]
+    #with tf.control_dependencies(gnans):
+        #main_op = tf.train.AdamOptimizer(0.002).apply_gradients(upd)
+main_op = tf.train.AdamOptimizer(0.002).minimize(kl)
 
 sess = tf.InteractiveSession()
 from flows.debug import wrapper
@@ -146,7 +146,7 @@ init = tf.global_variables_initializer()
 
 sess.run(init)
 
-writer = tf.summary.FileWriter('/tmp/tfdbg/gvar_connected')
+writer = tf.summary.FileWriter('/home/nikita/tmp/tfdbg/gvar_connected_fixedvar_0.2')
 
 def validate_year(year):
     cdic = {model.name:model for model in models}
@@ -173,23 +173,23 @@ def validate_year(year):
         mean_pred[model.name]['CYEAR={}'.format(year)] = a
     return mean_pred
 
-#saver.restore(sess, './save/gvar_hier_fullcond1000-MP')
+saver.restore(sess, './save/gvar_hier_fullcond1000-MP')
 
-epoch = 0
-for epoch in tqdm(range(epoch, 700)):
+epoch = 500
+for epoch in tqdm(range(epoch, 550)):
     fd = {current_year:YEARS[0]}
-    for step in range(10):
+    for step in range(20):
         sess.run(main_op, fd)
     s, _ = sess.run([summary, main_op], fd)
     writer.add_summary(s, global_step=epoch)
-    if epoch % 30 == 0:
+    if epoch % 50 == 0:
         saver.save(sess, './save/gvar_hier_fullcond1000-MP')
 
 validations = []
 for year in tqdm(YEARS):
     fd = {current_year: year}
     for epoch in range(epoch, epoch+10):
-        for step in range(10):
+        for step in range(20):
             sess.run(main_op, fd)
         s, _ = sess.run([summary, main_op], fd)
         writer.add_summary(s, global_step=epoch)

@@ -13,6 +13,7 @@ class VARmodel:
         self.var_dim = var_dim
 
         years = data.columns.values.astype('float32')
+        self.years = years
         years = tf.constant(years, dtype=tf.float32, name='data_years')
 
         if current_year is None:
