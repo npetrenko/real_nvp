@@ -8,3 +8,4 @@ MNIST-data
 *.pkl
 experiments/finished
 save
+figures
