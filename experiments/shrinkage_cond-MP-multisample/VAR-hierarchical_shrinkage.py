@@ -62,11 +62,11 @@ with tf.variable_scope('variation_rate', dtype=floatX):
     pp = tf.cast(tf.reduce_sum(variation_prior.log_prob(tf.cast(variation, tf.float32)), axis=-1), floatX)
     tf.add_to_collection('priors', pp)
 
-    tf.summary.histogram('variation', variation)
+    #tf.summary.histogram('variation', variation)
     tf.summary.scalar('mean_variation', tf.reduce_mean(variation))
 
 with tf.variable_scope('global_inf'):
-    global_inf = DFlow([NVPFlow(dim=(VAR_DIM*2+1)*VAR_DIM, name='flow_{}'.format(i), aux_vars=variation) for i in range(8)], 
+    global_inf = DFlow([NVPFlow(dim=(VAR_DIM*2+1)*VAR_DIM, name='flow_{}'.format(i), aux_vars=tf.log(variation)) for i in range(8)], 
                         init_sigma=0.01, num_samples=NUM_SAMPLES)
 
     with tf.variable_scope('prior'):
@@ -92,7 +92,7 @@ with tf.variable_scope(tf.get_variable_scope(), dtype=floatX, reuse=tf.AUTO_REUS
     for country, data in country_data.items():
         with tf.variable_scope(country):
             with tf.variable_scope('individ_variation'):
-                aux = tf.concat([global_inf.output, variation], axis=-1)
+                aux = tf.concat([global_inf.output, tf.log(variation)], axis=-1)
                 individ_variation = DFlow([NVPFlow((VAR_DIM*2+1)*VAR_DIM, 
                                                    name='nvp_{}'.format(i), 
                                                    aux_vars=aux) for i in range(8)], init_sigma=0.01, num_samples=NUM_SAMPLES)
@@ -129,14 +129,14 @@ kls = tf.summary.scalar('KLd', kl)
 summary = tf.summary.merge_all()
 
 saver = tf.train.Saver()
-#with tf.variable_scope('build_upd') as upd_scope:
-    #vs = tf.trainable_variables()
-    #grads = tf.gradients(kl, vs)
-    #upd = zip(grads, vs)
-    #gnans = [tf.check_numerics(x, 'nan in {}'.format(x.op.name)) for x in grads if x is not None]
-    #with tf.control_dependencies(gnans):
-        #main_op = tf.train.AdamOptimizer(0.002).apply_gradients(upd)
-main_op = tf.train.AdamOptimizer(0.002).minimize(kl)
+with tf.variable_scope('build_upd') as upd_scope:
+    vs = tf.trainable_variables()
+    grads = tf.gradients(kl, vs)
+    upd = zip(grads, vs)
+    gnans = [tf.check_numerics(x, 'nan in {}'.format(x.op.name)) for x in grads if x is not None]
+    with tf.control_dependencies(gnans):
+        main_op = tf.train.AdamOptimizer(0.002).apply_gradients(upd)
+#main_op = tf.train.AdamOptimizer(0.002).minimize(kl)
 
 sess = tf.InteractiveSession()
 from flows.debug import wrapper
@@ -146,7 +146,7 @@ init = tf.global_variables_initializer()
 
 sess.run(init)
 
-writer = tf.summary.FileWriter('/home/nikita/tmp/tfdbg/gvar_connected_fixedvar_0.2')
+writer = tf.summary.FileWriter('/home/nikita/tmp/tfdbg/contin_fast')
 
 def validate_year(year):
     cdic = {model.name:model for model in models}
@@ -174,27 +174,66 @@ def validate_year(year):
     return mean_pred
 
 saver.restore(sess, './save/gvar_hier_fullcond1000-MP')
+#print('restoring from failsave...')
+#saver.restore(sess, './save/failsave')
+#print('restored')
 
-epoch = 500
-for epoch in tqdm(range(epoch, 550)):
+def _run_main_op_faultcatch(fd):
+    final_attempt = True
+    for attempt in range(5):
+        try:
+            klv, _ = sess.run([kl, main_op], fd)
+            #print('KL: ', klv)
+            final_attempt = False
+            break
+        except tf.errors.InvalidArgumentError as loop_exc:
+            print('\nNan found in gradients, retrying...')
+            err = loop_exc
+    if final_attempt:
+        raise err
+
+def run_main_op_faultcatch(fd):
+    try:
+        _run_main_op_faultcatch(fd)
+    except tf.errors.InvalidArgumentError:
+        if needs_save:
+            saver.save(sess, './save/failsave')
+        print('Saver current parameters in failsave')
+        raise
+
+needs_save=True
+epoch = 0
+for epoch in tqdm(range(epoch, 30)):
     fd = {current_year:YEARS[0]}
     for step in range(20):
-        sess.run(main_op, fd)
-    s, _ = sess.run([summary, main_op], fd)
-    writer.add_summary(s, global_step=epoch)
-    if epoch % 50 == 0:
-        saver.save(sess, './save/gvar_hier_fullcond1000-MP')
+        run_main_op_faultcatch(fd)
+    try:
+        s, klv = sess.run([summary,kl], fd)
+        print('KL: ', klv)
+        writer.add_summary(s, global_step=epoch)
+    except tf.errors.InvalidArgumentError:
+        print('Nan found in summary, skipping')
+        pass
+    if (epoch % 50 == 0) and (epoch != 0):
+        if needs_save:
+            saver.save(sess, './save/gvar_hier_fullcond1000-MP')
+        pass
 
 validations = []
 for year in tqdm(YEARS):
     fd = {current_year: year}
-    for epoch in range(epoch, epoch+10):
+    for epoch in range(epoch, epoch+20):
         for step in range(20):
-            sess.run(main_op, fd)
-        s, _ = sess.run([summary, main_op], fd)
-        writer.add_summary(s, global_step=epoch)
+            run_main_op_faultcatch(fd)
+        try:
+            s = sess.run(summary, fd)
+            writer.add_summary(s, global_step=epoch)
+        except tf.errors.InvalidArgumentError:
+            pass
     if year % 4 == 0:
-        saver.save(sess, './save/gvar_hier_fullcond1000-MP')
+        if needs_save:
+            saver.save(sess, './save/gvar_hier_fullcond1000-MP')
+        pass
     validations.append(validate_year(year))
 
     with open('output_gvar_hier_fullcond1000-MP.pkl', 'wb') as f:

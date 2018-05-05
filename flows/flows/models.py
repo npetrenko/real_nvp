@@ -99,7 +99,10 @@ class VARmodel:
                 pwld = self.PWalk.logdens(outputs)
             else:
                 init = tf.zeros_like(outputs[:,0:1])
-                target = tf.concat([init, outputs[:,:-1]], axis=1)
+                #target = tf.concat([init, outputs[:,:-1]], axis=1)
+                ostep = self.OBSERV_STEPS-3
+                target = tf.concat([outputs[:,1:ostep-1], init,init, outputs[:,ostep-1:-1]], axis=1, name='target')
+                print(target)
                 diffs = outputs - target
                 diffs = tf.identity(diffs, name='diffs')
                 outputs = tf.identity(outputs, name='premu')
@@ -152,11 +155,15 @@ class VARmodel:
         self.logdensities.append(ldiag.logdens)
         self.priors.append(observ_prior)
 
-    def predict(self, observable_mask, outputs):
+    def predict(self, observable_mask, outputs, restrict=False):
         dim = self.dim
         data = self.data
         out = tf.reshape(outputs, [self.num_samples, self.DATA_STEPS, dim[0], dim[1]])
         out = tf.transpose(out, [1,0,2,3])
+        data = tf.transpose(tf.tile(data, [self.num_samples, 1, 1]), [1,0,2])
+
+        if restrict:
+            out, data, observable_mask = map(lambda x: x[:self.OBSERV_STEPS], [out,data,observable_mask])
 
         def step(prev, x):
             mask = x[0]
@@ -176,7 +183,6 @@ class VARmodel:
             new_pred = tf.concat([new_pred, pp1], axis=1)
             return new_pred
         
-        data = tf.transpose(tf.tile(data, [self.num_samples, 1, 1]), [1,0,2])
         predictions = tf.scan(step, [observable_mask, data, out], 
                               initializer=tf.zeros([self.num_samples, 2*dim[0]], dtype=floatX))
         return predictions
@@ -185,29 +191,28 @@ class VARmodel:
         dim = self.dim
         obs_d = self.obs_d
 
-        preds = self.predict(observable_mask, outputs)
-        self.preds = preds[:,:,:self.var_dim]
+        self.preds = self.predict(observable_mask, outputs)[:,:,:self.var_dim]
         print('preds', self.preds)
+        preds_restricted = self.predict(observable_mask, outputs, restrict=True)[:,:,:self.var_dim]
         
         with tf.name_scope('loglikelihood'):
-            data = tf.transpose(self.data, [1,0,2])
-            diffs = preds[:-1,:] - data[1:,:]
-            diffs = diffs[:,:,:dim[0]]
+            current_data = tf.transpose(self.data, [1,0,2])[:self.OBSERV_STEPS,:,:self.var_dim]
+            print(preds_restricted)
+            diffs = current_data[1:] - preds_restricted[:-1]
             print(diffs)
 
             def create_summary(diffs, name):
-                sigmas = tf.reduce_mean(self.std(diffs[:self.OBSERV_STEPS-1], axis=[0]), axis=0)
-                current_data = self.data[:,:self.OBSERV_STEPS]
-                std = self.std(current_data[0,1:,:self.var_dim] - current_data[0,:-1,:self.var_dim], axis=[0])
+                print('Diffs :', diffs)
+                sigmas = tf.reduce_mean(self.std(diffs, axis=[0]), axis=0)
+                std = self.std(current_data[1:] - current_data[:-1], axis=[0])
                 rsquareds = 1 - sigmas/std
-                tf.summary.scalar(name, tf.reduce_mean(rsquareds, axis=0))
+                tf.summary.scalar(name, tf.reduce_mean(rsquareds, axis=[0,1]))
 
             create_summary(diffs, 'rsquared_observed')
-            create_summary(tf.reduce_mean(diffs, axis=1)[:,tf.newaxis], 'rsquared_observed_pp')
+            create_summary(tf.reduce_mean(diffs, axis=1, keepdims=True), 'rsquared_observed_pp')
 
             logl = obs_d.logdens(diffs, reduce=[-1])
-            logl *= tf.cast(self.observable_mask[1:], floatX)[:,tf.newaxis]
-            logl = logl[:self.OBSERV_STEPS-1]
+            logl *= tf.cast(self.observable_mask[1:self.OBSERV_STEPS], floatX)[:,tf.newaxis]
 
             logl = tf.reduce_sum(logl, axis=0)
             self.priors.append(logl)
