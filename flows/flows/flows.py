@@ -8,8 +8,8 @@ import random
 from .batchnorm import Normalizer
 
 def softbound(x):
-    b = 8.
-    a = -8.
+    b = 3.
+    a = -3.
     assert b > a
     return a + (b-a)*(tf.atan(x/(b-a)) + np.pi/2)/np.pi
     #return x
@@ -312,15 +312,13 @@ class NVPFlow(MaskedFlow):
             else:
                 blend_tensor_full = blend_tensor
 
-            gate = FCN(blend_tensor_full, dim, num_hidden=max(self.default_hidden, self.dim*2), name='preelastic')
+            gate = FCN(blend_tensor_full, dim, num_hidden=max(self.default_hidden, self.dim*2), name='preelastic', softbound=softbound)
             transition = FCN(blend_tensor_full, dim, num_hidden=max(self.default_hidden, self.dim*2), name='transition')
 
             if self.normalize:
                 gate = self.gate_normalizer(gate, inverse=False)/10
                 transition = self.trans_normalizer(transition, inverse=False)/10
                 self.ops = self.gate_normalizer.ops + self.trans_normalizer.ops
-
-            gate = softbound(gate)
             
             if not inverse:
                 transformed = tf.exp(gate)*input_tensor + transition

@@ -1,6 +1,6 @@
 import tensorflow as tf
 from flows import NormalRW, DFlow, NVPFlow, LogNormal, GVAR, phase,Normal, floatX, MVNormal, MVNormalRW, Linear, LinearChol
-from flows.models import VARmodel
+from flows.models import VARmodelSV
 import flows
 from flows import parametrized as fp
 
@@ -53,7 +53,7 @@ current_year = tf.placeholder(tf.float32, shape=(), name='current_year')
 tf.summary.scalar('current_year', current_year)
 
 with tf.variable_scope('variation_rate', dtype=floatX):
-    variation_prior = tf.distributions.Exponential(rate=.3)
+    variation_prior = tf.distributions.Exponential(rate=3.)
     dim_ = (VAR_DIM*2+1)*VAR_DIM
     variation_d = fp.pLogNormal(shape=[NUM_SAMPLES, dim_], mu=math.log(0.2), sigma=-3.)
     
@@ -103,7 +103,7 @@ with tf.variable_scope(tf.get_variable_scope(), dtype=floatX, reuse=tf.AUTO_REUS
             tf.add_to_collection('logdensities', individ_variation.logdens)
             tf.add_to_collection('priors', individ_variation_prior.logdens(ind, reduce=[-1]))
                 
-        model = VARmodel(data, name='{}_model'.format(country), mu=ind[:, tf.newaxis], var_dim=VAR_DIM, current_year=current_year, num_samples=NUM_SAMPLES)
+        model = VARmodelSV(data, name='{}_model'.format(country), mu=ind[:, tf.newaxis], var_dim=VAR_DIM, current_year=current_year, num_samples=NUM_SAMPLES)
         models.append(model)
         for p in model.priors:
             tf.add_to_collection('priors', p)
@@ -146,7 +146,7 @@ init = tf.global_variables_initializer()
 
 sess.run(init)
 
-writer = tf.summary.FileWriter('/home/nikita/tmp/tfdbg/contin_fast-test')
+writer = tf.summary.FileWriter('/home/nikita/tmp/tfdbg/SVmodel-rate3-betternvp')
 
 def validate_year(year):
     cdic = {model.name:model for model in models}
@@ -187,6 +187,7 @@ def _run_main_op_faultcatch(fd):
             final_attempt = False
             break
         except tf.errors.InvalidArgumentError as loop_exc:
+            raise
             print('\nNan found in gradients, retrying...')
             err = loop_exc
     if final_attempt:
